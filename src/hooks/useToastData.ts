@@ -1,129 +1,98 @@
-// React hook for fetching Toast POS data
+// React hook for fetching dashboard data from Logbook API
 import { useState, useEffect, useCallback } from 'react';
-import { fetchDashboardData } from '../api/dataService';
-import type { RevenueMetrics, LaborMetrics, ShiftLeadData, RevenueMix, Period } from '../../types';
-
-// Fallback mock data when API is unavailable
-import { REVENUE_DATA, LABOR_DATA, SHIFT_LEADS, REVENUE_MIX, REVENUE_CHART_DATA } from '../../mockData';
-
-interface DashboardData {
-  revenueMetrics: RevenueMetrics;
-  laborMetrics: Partial<LaborMetrics>;
-  revenueMix: RevenueMix[];
-  hourlyData: { time: string; revenue: number; transactions: number }[];
-  shiftLeads: ShiftLeadData[];
-}
+import { fetchDashboardData, fetchRealtimeData, type DashboardData } from '../api/dataService';
+import type { Period } from '../../types';
+import type { Location } from '../api/logbookApi';
 
 interface UseToastDataResult {
   data: DashboardData | null;
   loading: boolean;
   error: Error | null;
   refetch: () => void;
-  isUsingMockData: boolean;
+  isLiveData: boolean;
 }
 
-export function useToastData(period: Period = 'Today'): UseToastDataResult {
+export function useToastData(
+  period: Period = 'Today',
+  location?: Location
+): UseToastDataResult {
   const [data, setData] = useState<DashboardData | null>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<Error | null>(null);
-  const [isUsingMockData, setIsUsingMockData] = useState(false);
 
   const fetchData = useCallback(async () => {
     setLoading(true);
     setError(null);
 
-    // Check if API credentials are configured
-    const hasCredentials =
-      import.meta.env.VITE_TOAST_CLIENT_ID &&
-      import.meta.env.VITE_TOAST_CLIENT_SECRET &&
-      import.meta.env.VITE_TOAST_RESTAURANT_GUID;
-
-    if (!hasCredentials) {
-      console.warn('Toast API credentials not configured. Using mock data.');
-      setData({
-        revenueMetrics: REVENUE_DATA[period],
-        laborMetrics: LABOR_DATA,
-        revenueMix: REVENUE_MIX,
-        hourlyData: REVENUE_CHART_DATA,
-        shiftLeads: SHIFT_LEADS,
-      });
-      setIsUsingMockData(true);
-      setLoading(false);
-      return;
-    }
-
     try {
-      const result = await fetchDashboardData(period);
-      setData({
-        revenueMetrics: result.revenueMetrics,
-        laborMetrics: result.laborMetrics,
-        revenueMix: result.revenueMix,
-        hourlyData: result.hourlyData,
-        shiftLeads: result.shiftLeads.length > 0 ? result.shiftLeads : SHIFT_LEADS,
-      });
-      setIsUsingMockData(false);
+      const result = await fetchDashboardData(period, location);
+      setData(result);
     } catch (err) {
-      console.error('Failed to fetch Toast data:', err);
+      console.error('Failed to fetch dashboard data:', err);
       setError(err instanceof Error ? err : new Error('Unknown error'));
-
-      // Fall back to mock data on error
-      setData({
-        revenueMetrics: REVENUE_DATA[period],
-        laborMetrics: LABOR_DATA,
-        revenueMix: REVENUE_MIX,
-        hourlyData: REVENUE_CHART_DATA,
-        shiftLeads: SHIFT_LEADS,
-      });
-      setIsUsingMockData(true);
     } finally {
       setLoading(false);
     }
-  }, [period]);
+  }, [period, location]);
 
   useEffect(() => {
     fetchData();
 
-    // Auto-refresh every 5 minutes for real data
-    const interval = setInterval(() => {
-      if (!isUsingMockData) {
-        fetchData();
-      }
-    }, 5 * 60 * 1000);
-
+    // Auto-refresh every 5 minutes
+    const interval = setInterval(fetchData, 5 * 60 * 1000);
     return () => clearInterval(interval);
-  }, [fetchData, isUsingMockData]);
+  }, [fetchData]);
 
   return {
     data,
     loading,
     error,
     refetch: fetchData,
-    isUsingMockData,
+    isLiveData: data?.isLiveData ?? false,
   };
 }
 
-// Hook for real-time order updates (for live dashboard)
-export function useRealtimeOrders(enabled = true) {
-  const [orderCount, setOrderCount] = useState(0);
+// Hook for real-time order updates
+export function useRealtimeData(enabled = true) {
+  const [data, setData] = useState<{
+    netSales: number;
+    orderCount: number;
+    laborHours: number;
+    currentlyClocked: any[];
+  } | null>(null);
   const [lastUpdate, setLastUpdate] = useState<Date | null>(null);
 
   useEffect(() => {
     if (!enabled) return;
 
-    // Poll for new orders every 30 seconds
-    const interval = setInterval(async () => {
-      try {
-        const { fetchRealtimeOrders } = await import('../api/dataService');
-        const orders = await fetchRealtimeOrders();
-        setOrderCount(orders.length);
+    const fetchRealtime = async () => {
+      const result = await fetchRealtimeData();
+      if (result) {
+        setData(result);
         setLastUpdate(new Date());
-      } catch (err) {
-        console.error('Failed to fetch realtime orders:', err);
       }
-    }, 30000);
+    };
 
+    // Initial fetch
+    fetchRealtime();
+
+    // Poll every 30 seconds
+    const interval = setInterval(fetchRealtime, 30000);
     return () => clearInterval(interval);
   }, [enabled]);
 
-  return { orderCount, lastUpdate };
+  return { data, lastUpdate };
+}
+
+// Hook for location selection
+export function useLocationFilter() {
+  const [location, setLocation] = useState<Location | undefined>(undefined);
+
+  const locations = [
+    { value: undefined, label: 'All Locations' },
+    { value: 'littleelm' as Location, label: 'Little Elm' },
+    { value: 'prosper' as Location, label: 'Prosper' },
+  ];
+
+  return { location, setLocation, locations };
 }

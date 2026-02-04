@@ -1,13 +1,15 @@
 
 import React, { useState, useEffect, useRef } from 'react';
-import { 
+import {
   BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer, LineChart, Line, AreaChart, Area, Cell, PieChart, Pie
 } from 'recharts';
-import { 
-  REVENUE_DATA, OPERATIONAL_DATA, SHIFT_LEADS, REVENUE_CHART_DATA, LABOR_DATA, EXPERIENCE_DATA 
+import {
+  REVENUE_DATA, OPERATIONAL_DATA, SHIFT_LEADS, REVENUE_CHART_DATA, LABOR_DATA, EXPERIENCE_DATA
 } from './mockData';
 import StatCard from './components/StatCard';
 import ShiftLeadTable from './components/ShiftLeadTable';
+import { useToastData, useLocationFilter } from './src/hooks/useToastData';
+import type { Period } from './types';
 
 // Extended Marketing Data with Social Links
 const MARKETING_STATS = {
@@ -58,20 +60,31 @@ const SidebarItem = ({ label, active = false, onClick, icon }: { label: string, 
 
 const App: React.FC = () => {
   const [activeTab, setActiveTab] = useState('Dashboard');
+  const [period, setPeriod] = useState<Period>('MTD');
+  const { location, setLocation, locations } = useLocationFilter();
+
+  // Fetch real data from Logbook API
+  const { data, loading, error, refetch, isLiveData } = useToastData(period, location);
+
+  // Fallback to mock data if API data not available
+  const revenueData = data?.revenueMetrics || REVENUE_DATA[period];
+  const operationalData = data?.operationalMetrics || OPERATIONAL_DATA;
+  const laborData = data?.laborMetrics || LABOR_DATA;
+  const experienceData = data?.experienceMetrics || EXPERIENCE_DATA;
+  const shiftLeads = data?.shiftLeads || SHIFT_LEADS;
+  const hourlyData = data?.hourlyData || REVENUE_CHART_DATA;
+
   const [refreshInterval, setRefreshInterval] = useState(30000);
   const [lastSync, setLastSync] = useState(new Date());
   const [isRefreshing, setIsRefreshing] = useState(false);
-  const [dynamicRevenue, setDynamicRevenue] = useState(REVENUE_DATA.MTD.netRevenue.value as number);
-  
+
   const refreshTimer = useRef<ReturnType<typeof setInterval> | null>(null);
 
-  const handleRefresh = () => {
+  const handleRefresh = async () => {
     setIsRefreshing(true);
-    setTimeout(() => {
-      setDynamicRevenue(prev => prev + (Math.random() * 50 - 20));
-      setLastSync(new Date());
-      setIsRefreshing(false);
-    }, 800);
+    await refetch();
+    setLastSync(new Date());
+    setIsRefreshing(false);
   };
 
   useEffect(() => {
@@ -82,7 +95,7 @@ const App: React.FC = () => {
     return () => { if (refreshTimer.current) clearInterval(refreshTimer.current); };
   }, [refreshInterval]);
 
-  const barData = REVENUE_CHART_DATA.map(d => ({
+  const barData = hourlyData.map(d => ({
     name: d.time,
     Investor: d.revenue * 0.5,
     Internal: d.revenue * 0.3,
@@ -91,11 +104,19 @@ const App: React.FC = () => {
 
   const renderDashboard = () => (
     <div className="space-y-10 animate-in fade-in duration-500">
+      {/* Data source indicator */}
+      {!isLiveData && (
+        <div className="bg-amber-50 border border-amber-200 text-amber-800 px-4 py-2 rounded-xl text-sm flex items-center space-x-2">
+          <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M12 9v2m0 4h.01m-6.938 4h13.856c1.54 0 2.502-1.667 1.732-3L13.732 4c-.77-1.333-2.694-1.333-3.464 0L3.34 16c-.77 1.333.192 3 1.732 3z"></path></svg>
+          <span>Showing sample data - API connection pending</span>
+        </div>
+      )}
+
       <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-6">
-        <StatCard label="Total Revenue" value={dynamicRevenue} change={REVENUE_DATA.MTD.netRevenue.change} isCurrency icon={<svg fill="none" stroke="currentColor" viewBox="0 0 24 24" className="w-4 h-4"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M12 8c-1.657 0-3 .895-3 2s1.343 2 3 2 3 .895 3 2-1.343 2-3 2m0-8c1.11 0 2.08.402 2.599 1M12 8V7m0 1v8m0 0v1m0-1c-1.11 0-2.08-.402-2.599-1M21 12a9 9 0 11-18 0 9 9 0 0118 0z"></path></svg>} />
-        <StatCard label="SSSG (%)" value={REVENUE_DATA.MTD.sssg.value} change={REVENUE_DATA.MTD.sssg.change} isPercent icon={<svg fill="none" stroke="currentColor" viewBox="0 0 24 24" className="w-4 h-4"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M13 7h8m0 0v8m0-8l-8 8-4-4-6 6"></path></svg>} />
-        <StatCard label="Guest Count" value={REVENUE_DATA.MTD.guestCount.value} change={REVENUE_DATA.MTD.guestCount.change} icon={<svg fill="none" stroke="currentColor" viewBox="0 0 24 24" className="w-4 h-4"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M17 20h5v-2a3 3 0 00-5.356-1.857M17 20H7m10 0v-2c0-.656-.126-1.283-.356-1.857M7 20H2v-2a3 3 0 015.356-1.857M7 20v-2c0-.656.126-1.283.356-1.857m0 0a5.002 5.002 0 019.288 0M15 7a3 3 0 11-6 0 3 3 0 016 0zm6 3a2 2 0 11-4 0 2 2 0 014 0zM7 10a2 2 0 11-4 0 2 2 0 014 0z"></path></svg>} />
-        <StatCard label="Average Ticket" value={REVENUE_DATA.MTD.avgTicket.value} change={REVENUE_DATA.MTD.avgTicket.change} isCurrency icon={<svg fill="none" stroke="currentColor" viewBox="0 0 24 24" className="w-4 h-4"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M15 12a3 3 0 11-6 0 3 3 0 016 0z"></path><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M2.458 12C3.732 7.943 7.523 5 12 5c4.478 0 8.268 2.943 9.542 7-1.274 4.057-5.064 7-9.542 7-4.477 0-8.268-2.943-9.542-7z"></path></svg>} />
+        <StatCard label="Total Revenue" value={revenueData.netRevenue.value} change={revenueData.netRevenue.change} isCurrency icon={<svg fill="none" stroke="currentColor" viewBox="0 0 24 24" className="w-4 h-4"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M12 8c-1.657 0-3 .895-3 2s1.343 2 3 2 3 .895 3 2-1.343 2-3 2m0-8c1.11 0 2.08.402 2.599 1M12 8V7m0 1v8m0 0v1m0-1c-1.11 0-2.08-.402-2.599-1M21 12a9 9 0 11-18 0 9 9 0 0118 0z"></path></svg>} />
+        <StatCard label="SSSG (%)" value={revenueData.sssg.value} change={revenueData.sssg.change} isPercent icon={<svg fill="none" stroke="currentColor" viewBox="0 0 24 24" className="w-4 h-4"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M13 7h8m0 0v8m0-8l-8 8-4-4-6 6"></path></svg>} />
+        <StatCard label="Guest Count" value={revenueData.guestCount.value} change={revenueData.guestCount.change} icon={<svg fill="none" stroke="currentColor" viewBox="0 0 24 24" className="w-4 h-4"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M17 20h5v-2a3 3 0 00-5.356-1.857M17 20H7m10 0v-2c0-.656-.126-1.283-.356-1.857M7 20H2v-2a3 3 0 015.356-1.857M7 20v-2c0-.656.126-1.283.356-1.857m0 0a5.002 5.002 0 019.288 0M15 7a3 3 0 11-6 0 3 3 0 016 0zm6 3a2 2 0 11-4 0 2 2 0 014 0zM7 10a2 2 0 11-4 0 2 2 0 014 0z"></path></svg>} />
+        <StatCard label="Average Ticket" value={revenueData.avgTicket.value} change={revenueData.avgTicket.change} isCurrency icon={<svg fill="none" stroke="currentColor" viewBox="0 0 24 24" className="w-4 h-4"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M15 12a3 3 0 11-6 0 3 3 0 016 0z"></path><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M2.458 12C3.732 7.943 7.523 5 12 5c4.478 0 8.268 2.943 9.542 7-1.274 4.057-5.064 7-9.542 7-4.477 0-8.268-2.943-9.542-7z"></path></svg>} />
       </div>
 
       <div className="grid grid-cols-1 lg:grid-cols-3 gap-8">
@@ -158,7 +179,7 @@ const App: React.FC = () => {
             <span className="text-[10px] font-bold text-emerald-600 uppercase tracking-widest">Active Shifts</span>
           </div>
         </div>
-        <ShiftLeadTable leads={SHIFT_LEADS} />
+        <ShiftLeadTable leads={shiftLeads} />
       </section>
     </div>
   );
@@ -166,10 +187,10 @@ const App: React.FC = () => {
   const renderOpsHealth = () => (
     <div className="space-y-10 animate-in slide-in-from-bottom-4 duration-500">
       <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-6">
-        <StatCard label="Avg Trip Time" value={`${OPERATIONAL_DATA.avgTripTime.value}s`} change={OPERATIONAL_DATA.avgTripTime.change} icon={<svg fill="none" stroke="currentColor" viewBox="0 0 24 24" className="w-4 h-4"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M12 8v4l3 3m6-3a9 9 0 11-18 0 9 9 0 0118 0z"></path></svg>} />
-        <StatCard label="P90 Service" value={`${OPERATIONAL_DATA.p90TripTime.value}s`} change={OPERATIONAL_DATA.p90TripTime.change} icon={<svg fill="none" stroke="currentColor" viewBox="0 0 24 24" className="w-4 h-4"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M13 10V3L4 14h7v7l9-11h-7z"></path></svg>} />
-        <StatCard label="Labor Cost (%)" value={LABOR_DATA.laborPercent.value} change={LABOR_DATA.laborPercent.change} isPercent icon={<svg fill="none" stroke="currentColor" viewBox="0 0 24 24" className="w-4 h-4"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M17 20h5v-2a3 3 0 00-5.356-1.857M17 20H7m10 0v-2c0-.656-.126-1.283-.356-1.857M7 20H2v-2a3 3 0 015.356-1.857M7 20v-2c0-.656.126-1.283.356-1.857m0 0a5.002 5.002 0 019.288 0M15 7a3 3 0 11-6 0 3 3 0 016 0zm6 3a2 2 0 11-4 0 2 2 0 014 0zM7 10a2 2 0 11-4 0 2 2 0 014 0z"></path></svg>} />
-        <StatCard label="Cars / Hour" value={OPERATIONAL_DATA.carsPerHour.value} change={OPERATIONAL_DATA.carsPerHour.change} icon={<svg fill="none" stroke="currentColor" viewBox="0 0 24 24" className="w-4 h-4"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M13 16h-1v-4h-1m1-4h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z"></path></svg>} />
+        <StatCard label="Avg Trip Time" value={`${operationalData.avgTripTime.value}s`} change={operationalData.avgTripTime.change} icon={<svg fill="none" stroke="currentColor" viewBox="0 0 24 24" className="w-4 h-4"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M12 8v4l3 3m6-3a9 9 0 11-18 0 9 9 0 0118 0z"></path></svg>} />
+        <StatCard label="P90 Service" value={`${operationalData.p90TripTime.value}s`} change={operationalData.p90TripTime.change} icon={<svg fill="none" stroke="currentColor" viewBox="0 0 24 24" className="w-4 h-4"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M13 10V3L4 14h7v7l9-11h-7z"></path></svg>} />
+        <StatCard label="Labor Cost (%)" value={laborData.laborPercent.value} change={laborData.laborPercent.change} isPercent icon={<svg fill="none" stroke="currentColor" viewBox="0 0 24 24" className="w-4 h-4"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M17 20h5v-2a3 3 0 00-5.356-1.857M17 20H7m10 0v-2c0-.656-.126-1.283-.356-1.857M7 20H2v-2a3 3 0 015.356-1.857M7 20v-2c0-.656.126-1.283.356-1.857m0 0a5.002 5.002 0 019.288 0M15 7a3 3 0 11-6 0 3 3 0 016 0zm6 3a2 2 0 11-4 0 2 2 0 014 0zM7 10a2 2 0 11-4 0 2 2 0 014 0z"></path></svg>} />
+        <StatCard label="Cars / Hour" value={operationalData.carsPerHour.value} change={operationalData.carsPerHour.change} icon={<svg fill="none" stroke="currentColor" viewBox="0 0 24 24" className="w-4 h-4"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M13 16h-1v-4h-1m1-4h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z"></path></svg>} />
       </div>
 
       <div className="grid grid-cols-1 lg:grid-cols-2 gap-8">
@@ -180,7 +201,7 @@ const App: React.FC = () => {
           </div>
           <div className="h-[300px]">
             <ResponsiveContainer width="100%" height="100%">
-              <LineChart data={REVENUE_CHART_DATA}>
+              <LineChart data={hourlyData}>
                 <CartesianGrid strokeDasharray="3 3" vertical={false} stroke="#f1f5f9" />
                 <XAxis dataKey="time" axisLine={false} tickLine={false} tick={{fontSize: 10, fill: '#94a3b8'}} />
                 <YAxis hide domain={[0, 300]} />
@@ -197,12 +218,12 @@ const App: React.FC = () => {
             <div className="grid grid-cols-2 gap-4">
               <div className="p-4 bg-slate-50 rounded-xl border border-slate-100">
                 <p className="text-[10px] font-bold text-slate-400 uppercase tracking-widest mb-1">Rev / Labor Hour</p>
-                <p className="text-xl font-black text-slate-900">${LABOR_DATA.revPerLaborHour.value}</p>
+                <p className="text-xl font-black text-slate-900">${laborData.revPerLaborHour.value}</p>
                 <p className="text-[9px] text-emerald-500 font-bold mt-1">Goal: $125.00</p>
               </div>
               <div className="p-4 bg-slate-50 rounded-xl border border-slate-100">
                 <p className="text-[10px] font-bold text-slate-400 uppercase tracking-widest mb-1">Labor Variance</p>
-                <p className="text-xl font-black text-rose-500">+{LABOR_DATA.laborVariance.value}h</p>
+                <p className="text-xl font-black text-rose-500">+{laborData.laborVariance.value}h</p>
                 <p className="text-[9px] text-rose-400 font-bold mt-1">Over Budget</p>
               </div>
             </div>
@@ -218,15 +239,15 @@ const App: React.FC = () => {
               <div className="flex justify-between mt-4">
                 <div className="text-center">
                   <p className="text-[9px] text-slate-500 font-bold uppercase">Refunds</p>
-                  <p className="text-xs font-bold text-rose-400">{EXPERIENCE_DATA.refundRemakeRate.value}%</p>
+                  <p className="text-xs font-bold text-rose-400">{experienceData.refundRemakeRate.value}%</p>
                 </div>
                 <div className="text-center">
                   <p className="text-[9px] text-slate-500 font-bold uppercase">5-Star Count</p>
-                  <p className="text-xs font-bold text-emerald-400">{EXPERIENCE_DATA.fiveStarReviews.value}</p>
+                  <p className="text-xs font-bold text-emerald-400">{experienceData.fiveStarReviews.value}</p>
                 </div>
                 <div className="text-center">
                   <p className="text-[9px] text-slate-500 font-bold uppercase">Velocity</p>
-                  <p className="text-xs font-bold text-blue-400">{EXPERIENCE_DATA.reviewVelocity.value}x</p>
+                  <p className="text-xs font-bold text-blue-400">{experienceData.reviewVelocity.value}x</p>
                 </div>
               </div>
             </div>
@@ -346,10 +367,26 @@ const App: React.FC = () => {
         <header className="h-20 bg-white/80 backdrop-blur-md border-b border-slate-100 flex items-center justify-between px-10 sticky top-0 z-20">
           <div className="flex items-center space-x-4">
             <h2 className="text-2xl font-bold text-slate-800 tracking-tight">{activeTab}</h2>
-            <div className={`flex items-center space-x-2 px-3 py-1 rounded-full text-[10px] font-bold uppercase tracking-widest transition-all ${isRefreshing ? 'bg-blue-50 text-blue-500 animate-pulse' : 'bg-slate-50 text-slate-400'}`}>
-              <div className={`w-1.5 h-1.5 rounded-full ${isRefreshing ? 'bg-blue-500' : 'bg-slate-300'}`}></div>
-              <span>{isRefreshing ? 'Refreshing...' : `Last Sync: ${lastSync.toLocaleTimeString()}`}</span>
+            <div className={`flex items-center space-x-2 px-3 py-1 rounded-full text-[10px] font-bold uppercase tracking-widest transition-all ${isRefreshing || loading ? 'bg-blue-50 text-blue-500 animate-pulse' : isLiveData ? 'bg-emerald-50 text-emerald-500' : 'bg-slate-50 text-slate-400'}`}>
+              <div className={`w-1.5 h-1.5 rounded-full ${isRefreshing || loading ? 'bg-blue-500' : isLiveData ? 'bg-emerald-500' : 'bg-slate-300'}`}></div>
+              <span>{isRefreshing || loading ? 'Refreshing...' : isLiveData ? 'Live Data' : `Last Sync: ${lastSync.toLocaleTimeString()}`}</span>
             </div>
+            {/* Period selector */}
+            <div className="flex items-center bg-slate-50 p-1 rounded-xl border border-slate-100">
+              {(['Today', 'WTD', 'MTD'] as Period[]).map((p) => (
+                <button key={p} onClick={() => setPeriod(p)} className={`px-3 py-1 text-[10px] font-bold rounded-lg transition-all ${period === p ? 'bg-white text-slate-900 shadow-sm' : 'text-slate-500 hover:text-slate-700'}`}>{p}</button>
+              ))}
+            </div>
+            {/* Location selector */}
+            <select
+              value={location || ''}
+              onChange={(e) => setLocation(e.target.value as any || undefined)}
+              className="text-[10px] font-bold bg-slate-50 border border-slate-100 rounded-xl px-3 py-1.5 text-slate-600"
+            >
+              {locations.map((loc) => (
+                <option key={loc.label} value={loc.value || ''}>{loc.label}</option>
+              ))}
+            </select>
           </div>
           
           <div className="flex items-center space-x-4">
@@ -378,13 +415,16 @@ const App: React.FC = () => {
             <div className="flex items-center space-x-6">
                <div className="flex flex-col">
                 <span className="text-[10px] text-slate-400 font-black uppercase tracking-[0.2em]">Operational Health</span>
-                <span className="text-xs font-bold text-emerald-500 uppercase tracking-tighter flex items-center">
-                  <span className="w-1.5 h-1.5 rounded-full bg-emerald-500 mr-2"></span> Connected
+                <span className={`text-xs font-bold uppercase tracking-tighter flex items-center ${isLiveData ? 'text-emerald-500' : 'text-amber-500'}`}>
+                  <span className={`w-1.5 h-1.5 rounded-full mr-2 ${isLiveData ? 'bg-emerald-500' : 'bg-amber-500'}`}></span>
+                  {isLiveData ? 'Live' : 'Sample Data'}
                 </span>
               </div>
               <div className="flex flex-col border-l border-slate-100 pl-6">
                 <span className="text-[10px] text-slate-400 font-black uppercase tracking-[0.2em]">Data Feed</span>
-                <span className="text-xs font-bold text-slate-800 uppercase tracking-tighter">Live Store Sync Texas #104</span>
+                <span className="text-xs font-bold text-slate-800 uppercase tracking-tighter">
+                  {isLiveData ? `Toast POS • ${location ? locations.find(l => l.value === location)?.label : 'All Locations'}` : 'Demo Mode'}
+                </span>
               </div>
             </div>
             <div className="flex items-center space-x-3 text-[9px] font-black tracking-[0.3em] text-slate-300 uppercase select-none">
