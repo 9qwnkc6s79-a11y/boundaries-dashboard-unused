@@ -33,48 +33,16 @@ function getDateRangeForPeriod(period: Period): { startDate: string; endDate: st
   return { startDate, endDate };
 }
 
-async function fetchSalesForDay(date: string, location: Location) {
-  const params = new URLSearchParams({ startDate: date, endDate: date });
-  params.append('location', location);
+async function fetchSalesFromToast(startDate: string, endDate: string, location?: Location) {
+  const params = new URLSearchParams({ startDate, endDate });
+  if (location) params.append('location', location);
 
-  const response = await fetch(`/api/toast-sales?${params}`);
-  if (!response.ok) throw new Error('Failed to fetch sales');
+  const response = await fetch(`/api/toast-direct?${params}`);
+  if (!response.ok) {
+    const error = await response.text();
+    throw new Error(`Failed to fetch sales: ${error}`);
+  }
   return response.json();
-}
-
-function getDatesBetween(startDate: string, endDate: string): string[] {
-  const dates: string[] = [];
-  const current = new Date(startDate + 'T00:00:00');
-  const end = new Date(endDate + 'T00:00:00');
-
-  while (current <= end) {
-    const year = current.getFullYear();
-    const month = String(current.getMonth() + 1).padStart(2, '0');
-    const day = String(current.getDate()).padStart(2, '0');
-    dates.push(`${year}-${month}-${day}`);
-    current.setDate(current.getDate() + 1);
-  }
-  return dates;
-}
-
-async function fetchSalesForRange(startDate: string, endDate: string, location: Location) {
-  const dates = getDatesBetween(startDate, endDate);
-  const dailyResults = await Promise.all(dates.map(date => fetchSalesForDay(date, location)));
-
-  // Sum up all days
-  let netSales = 0;
-  let totalOrders = 0;
-
-  for (const day of dailyResults) {
-    netSales += day.netSales || 0;
-    totalOrders += day.totalOrders || 0;
-  }
-
-  return {
-    netSales,
-    totalOrders,
-    averageCheck: totalOrders > 0 ? netSales / totalOrders : 0,
-  };
 }
 
 export function useToastData(period: Period = 'Today', location?: Location) {
@@ -90,26 +58,8 @@ export function useToastData(period: Period = 'Today', location?: Location) {
     try {
       const { startDate, endDate } = getDateRangeForPeriod(period);
 
-      let salesData;
-      if (location) {
-        // Single location - fetch each day and sum
-        salesData = await fetchSalesForRange(startDate, endDate, location);
-      } else {
-        // Aggregate both locations - fetch each day for each location and sum
-        const [elmData, prosperData] = await Promise.all([
-          fetchSalesForRange(startDate, endDate, 'littleelm'),
-          fetchSalesForRange(startDate, endDate, 'prosper'),
-        ]);
-
-        const totalOrders = (elmData?.totalOrders || 0) + (prosperData?.totalOrders || 0);
-        const netSales = (elmData?.netSales || 0) + (prosperData?.netSales || 0);
-
-        salesData = {
-          netSales,
-          totalOrders,
-          averageCheck: totalOrders > 0 ? netSales / totalOrders : 0,
-        };
-      }
+      // Fetch directly from Toast API (aggregates both locations if no location specified)
+      const salesData = await fetchSalesFromToast(startDate, endDate, location);
 
       // Transform to dashboard format
       const revenueMetrics = {
