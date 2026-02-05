@@ -1,5 +1,6 @@
 // Firebase integration for Boundaries Logbook data
-import { initializeApp } from 'firebase/app';
+// Uses lazy initialization to avoid crashes if Firebase is unavailable
+import { initializeApp, FirebaseApp } from 'firebase/app';
 import {
   getFirestore,
   collection,
@@ -10,7 +11,7 @@ import {
   where,
   orderBy,
   limit,
-  Timestamp,
+  Firestore,
 } from 'firebase/firestore';
 
 // Firebase configuration (Boundaries Logbook)
@@ -23,9 +24,25 @@ const firebaseConfig = {
   appId: '1:1234567890:web:abc123',
 };
 
-// Initialize Firebase
-const app = initializeApp(firebaseConfig);
-const db = getFirestore(app);
+// Lazy initialization
+let app: FirebaseApp | null = null;
+let db: Firestore | null = null;
+let initError: Error | null = null;
+
+function getDb(): Firestore | null {
+  if (initError) return null;
+  if (db) return db;
+
+  try {
+    app = initializeApp(firebaseConfig);
+    db = getFirestore(app);
+    return db;
+  } catch (error) {
+    console.warn('Firebase initialization failed:', error);
+    initError = error instanceof Error ? error : new Error('Firebase init failed');
+    return null;
+  }
+}
 
 const ORG_ID = 'org-boundaries';
 
@@ -77,7 +94,9 @@ export interface TrainingProgress {
 
 // Helper to get collection path
 function getOrgCollection(collectionName: string) {
-  return collection(db, `organizations/${ORG_ID}/data/${collectionName}`);
+  const database = getDb();
+  if (!database) return null;
+  return collection(database, `organizations/${ORG_ID}/data/${collectionName}`);
 }
 
 // Fetch recent checklist submissions
@@ -87,6 +106,8 @@ export async function getRecentSubmissions(
 ): Promise<ChecklistSubmission[]> {
   try {
     const submissionsRef = getOrgCollection('submissions');
+    if (!submissionsRef) return [];
+
     let q = query(submissionsRef, orderBy('submittedAt', 'desc'), limit(limitCount));
 
     if (storeId) {
@@ -117,6 +138,8 @@ export async function getSubmissionsByDateRange(
 ): Promise<ChecklistSubmission[]> {
   try {
     const submissionsRef = getOrgCollection('submissions');
+    if (!submissionsRef) return [];
+
     let q = query(
       submissionsRef,
       where('date', '>=', startDate),
@@ -145,6 +168,8 @@ export async function getSubmissionsByDateRange(
 export async function getUsers(storeId?: string): Promise<User[]> {
   try {
     const usersRef = getOrgCollection('users');
+    if (!usersRef) return [];
+
     const snapshot = await getDocs(usersRef);
 
     let users = snapshot.docs.map((doc) => ({
@@ -167,6 +192,11 @@ export async function getUsers(storeId?: string): Promise<User[]> {
 export async function getUserTrainingProgress(userId: string): Promise<TrainingProgress[]> {
   try {
     const progressRef = getOrgCollection('progress');
+    if (!progressRef) return [];
+
+    const database = getDb();
+    if (!database) return [];
+
     const progressDoc = await getDoc(doc(progressRef, userId));
 
     if (progressDoc.exists()) {
@@ -189,6 +219,8 @@ export async function getCashDeposits(
 ): Promise<any[]> {
   try {
     const depositsRef = getOrgCollection('deposits');
+    if (!depositsRef) return [];
+
     const q = query(
       depositsRef,
       where('date', '>=', startDate),
@@ -217,6 +249,8 @@ export async function getCashDeposits(
 export async function getGoogleReviews(): Promise<any> {
   try {
     const reviewsRef = getOrgCollection('googleReviews');
+    if (!reviewsRef) return null;
+
     const snapshot = await getDocs(reviewsRef);
 
     if (!snapshot.empty) {

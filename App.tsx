@@ -9,6 +9,7 @@ import {
 import StatCard from './components/StatCard';
 import ShiftLeadTable from './components/ShiftLeadTable';
 import type { Period } from './types';
+import { useToastData, useLocationFilter } from './src/hooks/useToastData';
 
 // Extended Marketing Data with Social Links
 const MARKETING_STATS = {
@@ -61,24 +62,19 @@ const App: React.FC = () => {
   const [activeTab, setActiveTab] = useState('Dashboard');
   const [period, setPeriod] = useState<Period>('MTD');
 
-  // Using mock data (API integration temporarily disabled for deployment fix)
-  const loading = false;
-  const isLiveData = false;
-  const location = undefined as string | undefined;
-  const setLocation = (_: any) => {};
-  const locations = [
-    { value: undefined, label: 'All Locations' },
-    { value: 'littleelm', label: 'Little Elm' },
-    { value: 'prosper', label: 'Prosper' },
-  ];
+  // Location filter hook
+  const { location, setLocation, locations } = useLocationFilter();
 
-  // Use mock data directly
-  const revenueData = REVENUE_DATA[period];
-  const operationalData = OPERATIONAL_DATA;
-  const laborData = LABOR_DATA;
-  const experienceData = EXPERIENCE_DATA;
-  const shiftLeads = SHIFT_LEADS;
-  const hourlyData = REVENUE_CHART_DATA;
+  // Fetch real data from Toast API via Logbook
+  const { data, loading, error, refetch, isLiveData } = useToastData(period, location);
+
+  // Use API data if available, fallback to mock data
+  const revenueData = data?.revenueMetrics || REVENUE_DATA[period];
+  const operationalData = data?.operationalMetrics || OPERATIONAL_DATA;
+  const laborData = data?.laborMetrics || LABOR_DATA;
+  const experienceData = data?.experienceMetrics || EXPERIENCE_DATA;
+  const shiftLeads = data?.shiftLeads || SHIFT_LEADS;
+  const hourlyData = data?.hourlyData || REVENUE_CHART_DATA;
 
   const [refreshInterval, setRefreshInterval] = useState(30000);
   const [lastSync, setLastSync] = useState(new Date());
@@ -88,10 +84,11 @@ const App: React.FC = () => {
 
   const handleRefresh = () => {
     setIsRefreshing(true);
+    refetch();
     setTimeout(() => {
       setLastSync(new Date());
       setIsRefreshing(false);
-    }, 500);
+    }, 1000);
   };
 
   useEffect(() => {
