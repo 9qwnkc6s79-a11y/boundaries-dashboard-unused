@@ -109,19 +109,37 @@ async function getOrdersSummary(
     if (order.voided) continue;
 
     let orderNet = 0;
+    let hasValidCheck = false;
+
     if (order.checks && Array.isArray(order.checks)) {
       for (const check of order.checks) {
+        // Skip voided checks or checks without closed payment
+        if (check.voided) continue;
+        if (check.paymentStatus !== 'CLOSED') continue;
+
+        hasValidCheck = true;
+
         // Use check.amount for net sales (pre-tax, excludes tips)
-        // Only count if check is not voided
-        if (!check.voided) {
-          orderNet += check.amount || 0;
+        let checkAmount = check.amount || 0;
+
+        // Subtract any refunds at the payment level
+        if (check.payments && Array.isArray(check.payments)) {
+          for (const payment of check.payments) {
+            if (payment.refund && payment.refund.refundAmount) {
+              checkAmount -= payment.refund.refundAmount;
+            }
+          }
         }
+
+        orderNet += checkAmount;
       }
     }
 
-    netSales += orderNet;
-    totalOrders++;
-    totalGuests += order.numberOfGuests || 1;
+    if (hasValidCheck) {
+      netSales += orderNet;
+      totalOrders++;
+      totalGuests += order.numberOfGuests || 1;
+    }
   }
 
   return {
