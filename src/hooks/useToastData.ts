@@ -64,7 +64,7 @@ export function useToastData(period: Period = 'Today', location?: Location) {
       // Transform to dashboard format
       const revenueMetrics = {
         netRevenue: { value: Math.round(salesData.netSales), change: 0 },
-        sssg: { value: 0, change: 0 },
+        sssg: { value: salesData.sssg || 0, change: 0 },
         guestCount: { value: salesData.totalOrders, change: 0 },
         avgTicket: { value: Math.round(salesData.averageCheck * 100) / 100, change: 0 },
       };

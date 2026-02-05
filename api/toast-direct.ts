@@ -13,6 +13,26 @@ const RESTAURANTS: Record<string, string> = {
 // Cache token
 let cachedToken: { token: string; expires: number } | null = null;
 
+// Calculate same period last year dates
+function getLastYearDates(startDate: string, endDate: string): { startDate: string; endDate: string } {
+  const start = new Date(startDate);
+  const end = new Date(endDate);
+  start.setFullYear(start.getFullYear() - 1);
+  end.setFullYear(end.getFullYear() - 1);
+
+  const formatDate = (d: Date) => {
+    const year = d.getFullYear();
+    const month = String(d.getMonth() + 1).padStart(2, '0');
+    const day = String(d.getDate()).padStart(2, '0');
+    return `${year}-${month}-${day}`;
+  };
+
+  return {
+    startDate: formatDate(start),
+    endDate: formatDate(end),
+  };
+}
+
 async function getAccessToken(): Promise<string> {
   if (cachedToken && cachedToken.expires > Date.now()) {
     return cachedToken.token;
@@ -168,31 +188,48 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
     }
 
     const token = await getAccessToken();
-
-    let results: any[] = [];
     const locations = location ? [String(location)] : ['littleelm', 'prosper'];
+
+    // Get last year's date range for SSSG calculation
+    const lastYear = getLastYearDates(String(startDate), String(endDate));
+
+    // Fetch current and last year data in parallel for each location
+    let currentResults: any[] = [];
+    let lastYearResults: any[] = [];
 
     for (const loc of locations) {
       const restaurantGuid = RESTAURANTS[loc];
       if (!restaurantGuid) continue;
 
-      const data = await getOrdersSummary(
-        restaurantGuid,
-        String(startDate),
-        String(endDate),
-        token
-      );
+      // Fetch current period and last year period in parallel
+      const [currentData, lastYearData] = await Promise.all([
+        getOrdersSummary(restaurantGuid, String(startDate), String(endDate), token),
+        getOrdersSummary(restaurantGuid, lastYear.startDate, lastYear.endDate, token).catch(() => ({
+          netSales: 0,
+          totalOrders: 0,
+          totalGuests: 0,
+          averageCheck: 0,
+        })),
+      ]);
 
-      results.push({ location: loc, ...data });
+      currentResults.push({ location: loc, ...currentData });
+      lastYearResults.push({ location: loc, ...lastYearData });
     }
 
-    if (results.length > 1) {
+    // Calculate SSSG for aggregated data
+    const currentTotal = currentResults.reduce((sum, r) => sum + r.netSales, 0);
+    const lastYearTotal = lastYearResults.reduce((sum, r) => sum + r.netSales, 0);
+    const sssg = lastYearTotal > 0 ? ((currentTotal - lastYearTotal) / lastYearTotal) * 100 : 0;
+
+    if (currentResults.length > 1) {
       const aggregated = {
-        netSales: results.reduce((sum, r) => sum + r.netSales, 0),
-        totalOrders: results.reduce((sum, r) => sum + r.totalOrders, 0),
-        totalGuests: results.reduce((sum, r) => sum + r.totalGuests, 0),
+        netSales: currentTotal,
+        totalOrders: currentResults.reduce((sum, r) => sum + r.totalOrders, 0),
+        totalGuests: currentResults.reduce((sum, r) => sum + r.totalGuests, 0),
         averageCheck: 0,
-        locations: results,
+        sssg: Math.round(sssg * 10) / 10, // Round to 1 decimal
+        lastYearNetSales: lastYearTotal,
+        locations: currentResults,
       };
       aggregated.averageCheck = aggregated.totalOrders > 0
         ? aggregated.netSales / aggregated.totalOrders
@@ -201,7 +238,16 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
       return res.status(200).json(aggregated);
     }
 
-    return res.status(200).json(results[0] || { error: 'No data' });
+    // Single location
+    const singleSssg = lastYearResults[0]?.netSales > 0
+      ? ((currentResults[0].netSales - lastYearResults[0].netSales) / lastYearResults[0].netSales) * 100
+      : 0;
+
+    return res.status(200).json({
+      ...currentResults[0],
+      sssg: Math.round(singleSssg * 10) / 10,
+      lastYearNetSales: lastYearResults[0]?.netSales || 0,
+    } || { error: 'No data' });
   } catch (error) {
     console.error('Toast direct API error:', error);
     return res.status(500).json({
