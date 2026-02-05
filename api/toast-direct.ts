@@ -108,20 +108,18 @@ async function getOrdersSummary(
   for (const order of orders) {
     if (order.voided) continue;
 
-    let orderTotal = 0;
+    let orderNet = 0;
     if (order.checks && Array.isArray(order.checks)) {
       for (const check of order.checks) {
-        if (check.payments && Array.isArray(check.payments)) {
-          for (const payment of check.payments) {
-            if (payment.refundStatus !== 'FULL') {
-              orderTotal += payment.amount || 0;
-            }
-          }
+        // Use check.amount for net sales (pre-tax, excludes tips)
+        // Only count if check is not voided
+        if (!check.voided) {
+          orderNet += check.amount || 0;
         }
       }
     }
 
-    netSales += orderTotal;
+    netSales += orderNet;
     totalOrders++;
     totalGuests += order.numberOfGuests || 1;
   }
