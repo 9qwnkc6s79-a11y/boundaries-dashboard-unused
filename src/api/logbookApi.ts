@@ -1,7 +1,8 @@
 // API client for Boundaries Logbook backend (Vercel serverless functions)
 // These endpoints proxy Toast POS API calls
 
-const LOGBOOK_API_BASE = 'https://boundaries-logbook-application.vercel.app/api';
+// Use local API proxy to avoid CORS issues
+const LOGBOOK_API_BASE = '/api';
 
 // Store location mapping
 export const STORE_LOCATIONS = {
