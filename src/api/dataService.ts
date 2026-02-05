@@ -62,12 +62,12 @@ function transformSalesData(
   };
 
   const prevSales = previous?.netSales || 0;
-  const prevGuests = previous?.guestCount || 0;
-  const prevAvgCheck = previous?.avgCheck || 0;
+  const prevOrders = previous?.totalOrders || 0;
+  const prevAvgCheck = previous?.averageCheck || 0;
 
   return {
     netRevenue: {
-      value: Math.round(current.netSales / 100), // Convert cents to dollars
+      value: Math.round(current.netSales), // API returns dollars
       change: calcChange(current.netSales, prevSales),
     },
     sssg: {
@@ -75,12 +75,12 @@ function transformSalesData(
       change: 0,
     },
     guestCount: {
-      value: current.guestCount || current.orderCount,
-      change: calcChange(current.guestCount || current.orderCount, prevGuests),
+      value: current.totalOrders,
+      change: calcChange(current.totalOrders, prevOrders),
     },
     avgTicket: {
-      value: Math.round((current.avgCheck / 100) * 100) / 100, // Convert cents, round to 2 decimals
-      change: calcChange(current.avgCheck, prevAvgCheck),
+      value: Math.round(current.averageCheck * 100) / 100, // API returns dollars
+      change: calcChange(current.averageCheck, prevAvgCheck),
     },
   };
 }

@@ -16,15 +16,20 @@ export type Location = (typeof STORE_LOCATIONS)[StoreId];
 // Toast Sales Data from Logbook API
 export interface ToastSalesData {
   netSales: number;
+  totalSales: number;
   grossSales: number;
-  orderCount: number;
-  guestCount: number;
-  avgCheck: number;
-  tips: number;
-  discounts: number;
-  refunds: number;
-  voids: number;
+  totalOrders: number;
+  orderCount?: number; // alias
+  guestCount?: number;
+  averageCheck: number;
+  avgCheck?: number; // alias
+  totalTips: number;
+  tips?: number;
+  discounts?: number;
+  refunds?: number;
+  voids?: number;
   hourlyBreakdown?: HourlySales[];
+  hourlySales?: Record<string, number>;
   revenueByChannel?: ChannelRevenue[];
 }
 
@@ -223,23 +228,18 @@ export async function getAggregatedSales(
     getToastSales(startDate, endDate, 'prosper').catch(() => null),
   ]);
 
+  const totalOrders = (elmData?.totalOrders || 0) + (prosperData?.totalOrders || 0);
+  const netSales = (elmData?.netSales || 0) + (prosperData?.netSales || 0);
+
   // Combine data from both locations
   const combined: ToastSalesData = {
-    netSales: (elmData?.netSales || 0) + (prosperData?.netSales || 0),
+    netSales,
+    totalSales: (elmData?.totalSales || 0) + (prosperData?.totalSales || 0),
     grossSales: (elmData?.grossSales || 0) + (prosperData?.grossSales || 0),
-    orderCount: (elmData?.orderCount || 0) + (prosperData?.orderCount || 0),
-    guestCount: (elmData?.guestCount || 0) + (prosperData?.guestCount || 0),
-    avgCheck: 0,
-    tips: (elmData?.tips || 0) + (prosperData?.tips || 0),
-    discounts: (elmData?.discounts || 0) + (prosperData?.discounts || 0),
-    refunds: (elmData?.refunds || 0) + (prosperData?.refunds || 0),
-    voids: (elmData?.voids || 0) + (prosperData?.voids || 0),
+    totalOrders,
+    averageCheck: totalOrders > 0 ? netSales / totalOrders : 0,
+    totalTips: (elmData?.totalTips || 0) + (prosperData?.totalTips || 0),
   };
-
-  // Calculate combined average check
-  if (combined.orderCount > 0) {
-    combined.avgCheck = combined.netSales / combined.orderCount;
-  }
 
   return combined;
 }
