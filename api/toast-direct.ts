@@ -16,6 +16,13 @@ const SSSG_ELIGIBLE_STORES = ['littleelm'];
 // Cache token
 let cachedToken: { token: string; expires: number } | null = null;
 
+const formatDate = (d: Date) => {
+  const year = d.getFullYear();
+  const month = String(d.getMonth() + 1).padStart(2, '0');
+  const day = String(d.getDate()).padStart(2, '0');
+  return `${year}-${month}-${day}`;
+};
+
 // Calculate same period last year dates
 function getLastYearDates(startDate: string, endDate: string): { startDate: string; endDate: string } {
   const start = new Date(startDate);
@@ -23,12 +30,18 @@ function getLastYearDates(startDate: string, endDate: string): { startDate: stri
   start.setFullYear(start.getFullYear() - 1);
   end.setFullYear(end.getFullYear() - 1);
 
-  const formatDate = (d: Date) => {
-    const year = d.getFullYear();
-    const month = String(d.getMonth() + 1).padStart(2, '0');
-    const day = String(d.getDate()).padStart(2, '0');
-    return `${year}-${month}-${day}`;
+  return {
+    startDate: formatDate(start),
+    endDate: formatDate(end),
   };
+}
+
+// Calculate same period last month dates
+function getLastMonthDates(startDate: string, endDate: string): { startDate: string; endDate: string } {
+  const start = new Date(startDate);
+  const end = new Date(endDate);
+  start.setMonth(start.getMonth() - 1);
+  end.setMonth(end.getMonth() - 1);
 
   return {
     startDate: formatDate(start),
@@ -193,24 +206,31 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
     const token = await getAccessToken();
     const locations = location ? [String(location)] : ['littleelm', 'prosper'];
 
-    // Get last year's date range for SSSG calculation
+    // Get comparison date ranges
     const lastYear = getLastYearDates(String(startDate), String(endDate));
+    const lastMonth = getLastMonthDates(String(startDate), String(endDate));
 
-    // Fetch current data for all requested locations
+    // Fetch current and last month data for all requested locations
     let currentResults: any[] = [];
+    let lastMonthResults: any[] = [];
 
     for (const loc of locations) {
       const restaurantGuid = RESTAURANTS[loc];
       if (!restaurantGuid) continue;
 
-      const currentData = await getOrdersSummary(
-        restaurantGuid,
-        String(startDate),
-        String(endDate),
-        token
-      );
+      // Fetch current and last month in parallel
+      const [currentData, lastMonthData] = await Promise.all([
+        getOrdersSummary(restaurantGuid, String(startDate), String(endDate), token),
+        getOrdersSummary(restaurantGuid, lastMonth.startDate, lastMonth.endDate, token).catch(() => ({
+          netSales: 0,
+          totalOrders: 0,
+          totalGuests: 0,
+          averageCheck: 0,
+        })),
+      ]);
 
       currentResults.push({ location: loc, ...currentData });
+      lastMonthResults.push({ location: loc, ...lastMonthData });
     }
 
     // Calculate SSSG using only eligible stores (stores that existed last year)
@@ -252,14 +272,41 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
       ? SSSG_ELIGIBLE_STORES.includes(String(location))
       : true; // All locations view uses eligible stores for SSSG
 
+    // Calculate last month totals for change percentages
+    const lastMonthTotal = {
+      netSales: lastMonthResults.reduce((sum, r) => sum + r.netSales, 0),
+      totalOrders: lastMonthResults.reduce((sum, r) => sum + r.totalOrders, 0),
+      averageCheck: 0,
+    };
+    lastMonthTotal.averageCheck = lastMonthTotal.totalOrders > 0
+      ? lastMonthTotal.netSales / lastMonthTotal.totalOrders
+      : 0;
+
+    // Helper to calculate % change
+    const calcChange = (current: number, previous: number) => {
+      if (previous === 0) return 0;
+      return Math.round(((current - previous) / previous) * 1000) / 10; // 1 decimal
+    };
+
     if (currentResults.length > 1) {
       const currentTotal = currentResults.reduce((sum, r) => sum + r.netSales, 0);
+      const currentOrders = currentResults.reduce((sum, r) => sum + r.totalOrders, 0);
+      const currentGuests = currentResults.reduce((sum, r) => sum + r.totalGuests, 0);
+      const currentAvgCheck = currentOrders > 0 ? currentTotal / currentOrders : 0;
+
       const aggregated = {
         netSales: currentTotal,
-        totalOrders: currentResults.reduce((sum, r) => sum + r.totalOrders, 0),
-        totalGuests: currentResults.reduce((sum, r) => sum + r.totalGuests, 0),
-        averageCheck: 0,
+        totalOrders: currentOrders,
+        totalGuests: currentGuests,
+        averageCheck: currentAvgCheck,
         sssg: Math.round(sssg * 10) / 10,
+        // Month-over-month changes
+        changes: {
+          netSales: calcChange(currentTotal, lastMonthTotal.netSales),
+          totalOrders: calcChange(currentOrders, lastMonthTotal.totalOrders),
+          averageCheck: calcChange(currentAvgCheck, lastMonthTotal.averageCheck),
+        },
+        lastMonth: lastMonthTotal,
         sssgComparison: {
           currentStoreSales: sssgCurrentTotal,
           lastYearStoreSales: sssgLastYearTotal,
@@ -267,17 +314,23 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
         },
         locations: currentResults,
       };
-      aggregated.averageCheck = aggregated.totalOrders > 0
-        ? aggregated.netSales / aggregated.totalOrders
-        : 0;
 
       return res.status(200).json(aggregated);
     }
 
-    // Single location - only show SSSG if it's an eligible store
+    // Single location
+    const currentAvgCheck = currentResults[0]?.averageCheck || 0;
+    const lastMonthAvgCheck = lastMonthResults[0]?.averageCheck || 0;
+
     return res.status(200).json({
       ...currentResults[0],
       sssg: isSssgEligible ? Math.round(sssg * 10) / 10 : null,
+      changes: {
+        netSales: calcChange(currentResults[0]?.netSales || 0, lastMonthResults[0]?.netSales || 0),
+        totalOrders: calcChange(currentResults[0]?.totalOrders || 0, lastMonthResults[0]?.totalOrders || 0),
+        averageCheck: calcChange(currentAvgCheck, lastMonthAvgCheck),
+      },
+      lastMonth: lastMonthResults[0] || null,
       sssgComparison: isSssgEligible ? {
         currentStoreSales: sssgCurrentTotal,
         lastYearStoreSales: sssgLastYearTotal,

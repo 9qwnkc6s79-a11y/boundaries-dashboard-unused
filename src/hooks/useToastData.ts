@@ -62,11 +62,13 @@ export function useToastData(period: Period = 'Today', location?: Location) {
       const salesData = await fetchSalesFromToast(startDate, endDate, location);
 
       // Transform to dashboard format
+      // Use month-over-month changes from API
+      const changes = salesData.changes || {};
       const revenueMetrics = {
-        netRevenue: { value: Math.round(salesData.netSales), change: 0 },
+        netRevenue: { value: Math.round(salesData.netSales), change: changes.netSales || 0 },
         sssg: { value: salesData.sssg || 0, change: 0 },
-        guestCount: { value: salesData.totalOrders, change: 0 },
-        avgTicket: { value: Math.round(salesData.averageCheck * 100) / 100, change: 0 },
+        guestCount: { value: salesData.totalOrders, change: changes.totalOrders || 0 },
+        avgTicket: { value: Math.round(salesData.averageCheck * 100) / 100, change: changes.averageCheck || 0 },
       };
 
       setData({
