@@ -10,6 +10,9 @@ const RESTAURANTS: Record<string, string> = {
   prosper: process.env.TOAST_RESTAURANT_PROSPER || 'f5e036bc-d8d0-4da9-8ec7-aec94806253b',
 };
 
+// Stores that existed last year (for SSSG calculation)
+const SSSG_ELIGIBLE_STORES = ['littleelm'];
+
 // Cache token
 let cachedToken: { token: string; expires: number } | null = null;
 
@@ -193,42 +196,75 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
     // Get last year's date range for SSSG calculation
     const lastYear = getLastYearDates(String(startDate), String(endDate));
 
-    // Fetch current and last year data in parallel for each location
+    // Fetch current data for all requested locations
     let currentResults: any[] = [];
-    let lastYearResults: any[] = [];
 
     for (const loc of locations) {
       const restaurantGuid = RESTAURANTS[loc];
       if (!restaurantGuid) continue;
 
-      // Fetch current period and last year period in parallel
-      const [currentData, lastYearData] = await Promise.all([
-        getOrdersSummary(restaurantGuid, String(startDate), String(endDate), token),
-        getOrdersSummary(restaurantGuid, lastYear.startDate, lastYear.endDate, token).catch(() => ({
-          netSales: 0,
-          totalOrders: 0,
-          totalGuests: 0,
-          averageCheck: 0,
-        })),
-      ]);
+      const currentData = await getOrdersSummary(
+        restaurantGuid,
+        String(startDate),
+        String(endDate),
+        token
+      );
 
       currentResults.push({ location: loc, ...currentData });
-      lastYearResults.push({ location: loc, ...lastYearData });
     }
 
-    // Calculate SSSG for aggregated data
-    const currentTotal = currentResults.reduce((sum, r) => sum + r.netSales, 0);
-    const lastYearTotal = lastYearResults.reduce((sum, r) => sum + r.netSales, 0);
-    const sssg = lastYearTotal > 0 ? ((currentTotal - lastYearTotal) / lastYearTotal) * 100 : 0;
+    // Calculate SSSG using only eligible stores (stores that existed last year)
+    // Only Little Elm is eligible since Prosper is a new store
+    let sssgCurrentTotal = 0;
+    let sssgLastYearTotal = 0;
+
+    for (const loc of SSSG_ELIGIBLE_STORES) {
+      const restaurantGuid = RESTAURANTS[loc];
+      if (!restaurantGuid) continue;
+
+      // Get current period sales for this eligible store
+      const currentForStore = currentResults.find(r => r.location === loc);
+      if (currentForStore) {
+        sssgCurrentTotal += currentForStore.netSales;
+      }
+
+      // Get last year sales for this eligible store
+      try {
+        const lastYearData = await getOrdersSummary(
+          restaurantGuid,
+          lastYear.startDate,
+          lastYear.endDate,
+          token
+        );
+        sssgLastYearTotal += lastYearData.netSales;
+      } catch {
+        // No last year data available
+      }
+    }
+
+    // SSSG compares only same-store sales (Little Elm vs Little Elm last year)
+    const sssg = sssgLastYearTotal > 0
+      ? ((sssgCurrentTotal - sssgLastYearTotal) / sssgLastYearTotal) * 100
+      : 0;
+
+    // Check if the single requested location is SSSG eligible
+    const isSssgEligible = location
+      ? SSSG_ELIGIBLE_STORES.includes(String(location))
+      : true; // All locations view uses eligible stores for SSSG
 
     if (currentResults.length > 1) {
+      const currentTotal = currentResults.reduce((sum, r) => sum + r.netSales, 0);
       const aggregated = {
         netSales: currentTotal,
         totalOrders: currentResults.reduce((sum, r) => sum + r.totalOrders, 0),
         totalGuests: currentResults.reduce((sum, r) => sum + r.totalGuests, 0),
         averageCheck: 0,
-        sssg: Math.round(sssg * 10) / 10, // Round to 1 decimal
-        lastYearNetSales: lastYearTotal,
+        sssg: Math.round(sssg * 10) / 10,
+        sssgComparison: {
+          currentStoreSales: sssgCurrentTotal,
+          lastYearStoreSales: sssgLastYearTotal,
+          eligibleStores: SSSG_ELIGIBLE_STORES,
+        },
         locations: currentResults,
       };
       aggregated.averageCheck = aggregated.totalOrders > 0
@@ -238,15 +274,15 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
       return res.status(200).json(aggregated);
     }
 
-    // Single location
-    const singleSssg = lastYearResults[0]?.netSales > 0
-      ? ((currentResults[0].netSales - lastYearResults[0].netSales) / lastYearResults[0].netSales) * 100
-      : 0;
-
+    // Single location - only show SSSG if it's an eligible store
     return res.status(200).json({
       ...currentResults[0],
-      sssg: Math.round(singleSssg * 10) / 10,
-      lastYearNetSales: lastYearResults[0]?.netSales || 0,
+      sssg: isSssgEligible ? Math.round(sssg * 10) / 10 : null,
+      sssgComparison: isSssgEligible ? {
+        currentStoreSales: sssgCurrentTotal,
+        lastYearStoreSales: sssgLastYearTotal,
+        eligibleStores: SSSG_ELIGIBLE_STORES,
+      } : null,
     } || { error: 'No data' });
   } catch (error) {
     console.error('Toast direct API error:', error);
