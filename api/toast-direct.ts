@@ -10,20 +10,17 @@ const RESTAURANTS: Record<string, string> = {
   prosper: process.env.TOAST_RESTAURANT_PROSPER || 'f5e036bc-d8d0-4da9-8ec7-aec94806253b',
 };
 
-// Cache token to avoid re-auth on every request
+// Cache token
 let cachedToken: { token: string; expires: number } | null = null;
 
 async function getAccessToken(): Promise<string> {
-  // Return cached token if still valid
   if (cachedToken && cachedToken.expires > Date.now()) {
     return cachedToken.token;
   }
 
   const response = await fetch(`${TOAST_API}/authentication/v1/authentication/login`, {
     method: 'POST',
-    headers: {
-      'Content-Type': 'application/json',
-    },
+    headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify({
       clientId: CLIENT_ID,
       clientSecret: CLIENT_SECRET,
@@ -37,8 +34,6 @@ async function getAccessToken(): Promise<string> {
   }
 
   const data = await response.json();
-
-  // Cache token for 23 hours (tokens typically last 24 hours)
   cachedToken = {
     token: data.token?.accessToken || data.accessToken,
     expires: Date.now() + 23 * 60 * 60 * 1000,
@@ -47,32 +42,65 @@ async function getAccessToken(): Promise<string> {
   return cachedToken.token;
 }
 
+// Get all orders with pagination
+async function getAllOrders(
+  restaurantGuid: string,
+  startDate: string,
+  endDate: string,
+  token: string
+): Promise<any[]> {
+  const allOrders: any[] = [];
+  let page = 1;
+  const pageSize = 100;
+  let hasMore = true;
+
+  while (hasMore) {
+    const response = await fetch(
+      `${TOAST_API}/orders/v2/ordersBulk?startDate=${startDate}T00:00:00.000Z&endDate=${endDate}T23:59:59.999Z&pageSize=${pageSize}&page=${page}`,
+      {
+        headers: {
+          'Authorization': `Bearer ${token}`,
+          'Toast-Restaurant-External-ID': restaurantGuid,
+        },
+      }
+    );
+
+    if (!response.ok) {
+      const error = await response.text();
+      throw new Error(`Toast orders API failed: ${response.status} - ${error}`);
+    }
+
+    const orders = await response.json();
+
+    if (Array.isArray(orders) && orders.length > 0) {
+      allOrders.push(...orders);
+      if (orders.length < pageSize) {
+        hasMore = false;
+      } else {
+        page++;
+      }
+    } else {
+      hasMore = false;
+    }
+
+    // Safety limit
+    if (page > 50) {
+      console.warn('Hit pagination safety limit');
+      break;
+    }
+  }
+
+  return allOrders;
+}
+
 async function getOrdersSummary(
   restaurantGuid: string,
   startDate: string,
   endDate: string,
   token: string
 ): Promise<any> {
-  // Toast Orders API - get orders for date range
-  const response = await fetch(
-    `${TOAST_API}/orders/v2/ordersBulk?startDate=${startDate}T00:00:00.000Z&endDate=${endDate}T23:59:59.999Z`,
-    {
-      headers: {
-        'Authorization': `Bearer ${token}`,
-        'Toast-Restaurant-External-ID': restaurantGuid,
-        'Content-Type': 'application/json',
-      },
-    }
-  );
+  const orders = await getAllOrders(restaurantGuid, startDate, endDate, token);
 
-  if (!response.ok) {
-    const error = await response.text();
-    throw new Error(`Toast orders API failed: ${response.status} - ${error}`);
-  }
-
-  const orders = await response.json();
-
-  // Calculate summary from orders
   let netSales = 0;
   let totalOrders = 0;
   let totalGuests = 0;
@@ -80,7 +108,6 @@ async function getOrdersSummary(
   for (const order of orders) {
     if (order.voided) continue;
 
-    // Sum payments from all checks in the order
     let orderTotal = 0;
     if (order.checks && Array.isArray(order.checks)) {
       for (const check of order.checks) {
@@ -100,7 +127,7 @@ async function getOrdersSummary(
   }
 
   return {
-    netSales, // Already in dollars
+    netSales,
     totalOrders,
     totalGuests,
     averageCheck: totalOrders > 0 ? netSales / totalOrders : 0,
@@ -108,7 +135,6 @@ async function getOrdersSummary(
 }
 
 export default async function handler(req: VercelRequest, res: VercelResponse) {
-  // CORS headers
   res.setHeader('Access-Control-Allow-Origin', '*');
   res.setHeader('Access-Control-Allow-Methods', 'GET, OPTIONS');
   res.setHeader('Access-Control-Allow-Headers', 'Content-Type');
@@ -132,10 +158,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
 
     for (const loc of locations) {
       const restaurantGuid = RESTAURANTS[loc];
-      if (!restaurantGuid) {
-        console.warn(`No restaurant GUID for location: ${loc}`);
-        continue;
-      }
+      if (!restaurantGuid) continue;
 
       const data = await getOrdersSummary(
         restaurantGuid,
@@ -147,7 +170,6 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
       results.push({ location: loc, ...data });
     }
 
-    // Aggregate if multiple locations
     if (results.length > 1) {
       const aggregated = {
         netSales: results.reduce((sum, r) => sum + r.netSales, 0),
