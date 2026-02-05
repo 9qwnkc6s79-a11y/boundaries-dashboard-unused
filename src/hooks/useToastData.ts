@@ -1,35 +1,111 @@
-// React hook for fetching dashboard data from Logbook API
+// Simplified hook for fetching Toast sales data
 import { useState, useEffect, useCallback } from 'react';
-import { fetchDashboardData, fetchRealtimeData, type DashboardData } from '../api/dataService';
 import type { Period } from '../../types';
-import type { Location } from '../api/logbookApi';
+import { REVENUE_DATA, OPERATIONAL_DATA, LABOR_DATA, EXPERIENCE_DATA, SHIFT_LEADS, REVENUE_MIX, REVENUE_CHART_DATA } from '../../mockData';
 
-interface UseToastDataResult {
-  data: DashboardData | null;
-  loading: boolean;
-  error: Error | null;
-  refetch: () => void;
-  isLiveData: boolean;
+export type Location = 'littleelm' | 'prosper' | undefined;
+
+function getDateRangeForPeriod(period: Period): { startDate: string; endDate: string } {
+  const now = new Date();
+  const endDate = now.toISOString().split('T')[0];
+
+  let startDate: string;
+  switch (period) {
+    case 'Today':
+      startDate = endDate;
+      break;
+    case 'WTD':
+      const dayOfWeek = now.getDay();
+      const weekStart = new Date(now);
+      weekStart.setDate(now.getDate() - dayOfWeek);
+      startDate = weekStart.toISOString().split('T')[0];
+      break;
+    case 'MTD':
+      startDate = `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, '0')}-01`;
+      break;
+    default:
+      startDate = endDate;
+  }
+  return { startDate, endDate };
 }
 
-export function useToastData(
-  period: Period = 'Today',
-  location?: Location
-): UseToastDataResult {
-  const [data, setData] = useState<DashboardData | null>(null);
+async function fetchSales(startDate: string, endDate: string, location?: Location) {
+  const params = new URLSearchParams({ startDate, endDate });
+  if (location) params.append('location', location);
+
+  const response = await fetch(`/api/toast-sales?${params}`);
+  if (!response.ok) throw new Error('Failed to fetch sales');
+  return response.json();
+}
+
+export function useToastData(period: Period = 'Today', location?: Location) {
+  const [data, setData] = useState<any>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<Error | null>(null);
+  const [isLiveData, setIsLiveData] = useState(false);
 
   const fetchData = useCallback(async () => {
     setLoading(true);
     setError(null);
 
     try {
-      const result = await fetchDashboardData(period, location);
-      setData(result);
+      const { startDate, endDate } = getDateRangeForPeriod(period);
+
+      let salesData;
+      if (location) {
+        // Single location
+        salesData = await fetchSales(startDate, endDate, location);
+      } else {
+        // Aggregate both locations
+        const [elmData, prosperData] = await Promise.all([
+          fetchSales(startDate, endDate, 'littleelm'),
+          fetchSales(startDate, endDate, 'prosper'),
+        ]);
+
+        const totalOrders = (elmData?.totalOrders || 0) + (prosperData?.totalOrders || 0);
+        const netSales = (elmData?.netSales || 0) + (prosperData?.netSales || 0);
+
+        salesData = {
+          netSales,
+          totalOrders,
+          averageCheck: totalOrders > 0 ? netSales / totalOrders : 0,
+        };
+      }
+
+      // Transform to dashboard format
+      const revenueMetrics = {
+        netRevenue: { value: Math.round(salesData.netSales), change: 0 },
+        sssg: { value: 0, change: 0 },
+        guestCount: { value: salesData.totalOrders, change: 0 },
+        avgTicket: { value: Math.round(salesData.averageCheck * 100) / 100, change: 0 },
+      };
+
+      setData({
+        revenueMetrics,
+        operationalMetrics: OPERATIONAL_DATA,
+        laborMetrics: LABOR_DATA,
+        experienceMetrics: EXPERIENCE_DATA,
+        shiftLeads: SHIFT_LEADS,
+        revenueMix: REVENUE_MIX,
+        hourlyData: REVENUE_CHART_DATA,
+        isLiveData: true,
+      });
+      setIsLiveData(true);
     } catch (err) {
-      console.error('Failed to fetch dashboard data:', err);
+      console.error('Failed to fetch Toast data:', err);
       setError(err instanceof Error ? err : new Error('Unknown error'));
+      // Fallback to mock data
+      setData({
+        revenueMetrics: REVENUE_DATA[period],
+        operationalMetrics: OPERATIONAL_DATA,
+        laborMetrics: LABOR_DATA,
+        experienceMetrics: EXPERIENCE_DATA,
+        shiftLeads: SHIFT_LEADS,
+        revenueMix: REVENUE_MIX,
+        hourlyData: REVENUE_CHART_DATA,
+        isLiveData: false,
+      });
+      setIsLiveData(false);
     } finally {
       setLoading(false);
     }
@@ -37,56 +113,13 @@ export function useToastData(
 
   useEffect(() => {
     fetchData();
-
-    // Auto-refresh every 5 minutes
-    const interval = setInterval(fetchData, 5 * 60 * 1000);
-    return () => clearInterval(interval);
   }, [fetchData]);
 
-  return {
-    data,
-    loading,
-    error,
-    refetch: fetchData,
-    isLiveData: data?.isLiveData ?? false,
-  };
+  return { data, loading, error, refetch: fetchData, isLiveData };
 }
 
-// Hook for real-time order updates
-export function useRealtimeData(enabled = true) {
-  const [data, setData] = useState<{
-    netSales: number;
-    orderCount: number;
-    laborHours: number;
-    currentlyClocked: any[];
-  } | null>(null);
-  const [lastUpdate, setLastUpdate] = useState<Date | null>(null);
-
-  useEffect(() => {
-    if (!enabled) return;
-
-    const fetchRealtime = async () => {
-      const result = await fetchRealtimeData();
-      if (result) {
-        setData(result);
-        setLastUpdate(new Date());
-      }
-    };
-
-    // Initial fetch
-    fetchRealtime();
-
-    // Poll every 30 seconds
-    const interval = setInterval(fetchRealtime, 30000);
-    return () => clearInterval(interval);
-  }, [enabled]);
-
-  return { data, lastUpdate };
-}
-
-// Hook for location selection
 export function useLocationFilter() {
-  const [location, setLocation] = useState<Location | undefined>(undefined);
+  const [location, setLocation] = useState<Location>(undefined);
 
   const locations = [
     { value: undefined, label: 'All Locations' },
