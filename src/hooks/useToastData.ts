@@ -6,8 +6,12 @@ import { REVENUE_DATA, OPERATIONAL_DATA, LABOR_DATA, EXPERIENCE_DATA, SHIFT_LEAD
 export type Location = 'littleelm' | 'prosper' | undefined;
 
 function getDateRangeForPeriod(period: Period): { startDate: string; endDate: string } {
+  // Use local date, not UTC
   const now = new Date();
-  const endDate = now.toISOString().split('T')[0];
+  const year = now.getFullYear();
+  const month = String(now.getMonth() + 1).padStart(2, '0');
+  const day = String(now.getDate()).padStart(2, '0');
+  const endDate = `${year}-${month}-${day}`;
 
   let startDate: string;
   switch (period) {
@@ -18,10 +22,10 @@ function getDateRangeForPeriod(period: Period): { startDate: string; endDate: st
       const dayOfWeek = now.getDay();
       const weekStart = new Date(now);
       weekStart.setDate(now.getDate() - dayOfWeek);
-      startDate = weekStart.toISOString().split('T')[0];
+      startDate = `${weekStart.getFullYear()}-${String(weekStart.getMonth() + 1).padStart(2, '0')}-${String(weekStart.getDate()).padStart(2, '0')}`;
       break;
     case 'MTD':
-      startDate = `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, '0')}-01`;
+      startDate = `${year}-${month}-01`;
       break;
     default:
       startDate = endDate;
