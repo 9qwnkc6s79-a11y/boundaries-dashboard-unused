@@ -80,16 +80,30 @@ async function getOrdersSummary(
   for (const order of orders) {
     if (order.voided) continue;
 
-    netSales += order.totalAmount || 0;
+    // Sum payments from all checks in the order
+    let orderTotal = 0;
+    if (order.checks && Array.isArray(order.checks)) {
+      for (const check of order.checks) {
+        if (check.payments && Array.isArray(check.payments)) {
+          for (const payment of check.payments) {
+            if (payment.refundStatus !== 'FULL') {
+              orderTotal += payment.amount || 0;
+            }
+          }
+        }
+      }
+    }
+
+    netSales += orderTotal;
     totalOrders++;
     totalGuests += order.numberOfGuests || 1;
   }
 
   return {
-    netSales: netSales / 100, // Toast returns cents
+    netSales, // Already in dollars
     totalOrders,
     totalGuests,
-    averageCheck: totalOrders > 0 ? (netSales / 100) / totalOrders : 0,
+    averageCheck: totalOrders > 0 ? netSales / totalOrders : 0,
   };
 }
 
