@@ -10,42 +10,40 @@ import StatCard from './components/StatCard';
 import ShiftLeadTable from './components/ShiftLeadTable';
 import type { Period } from './types';
 import { useToastData, useLocationFilter } from './src/hooks/useToastData';
+import { useLaborData } from './src/hooks/useLaborData';
+import { useOperationsData } from './src/hooks/useOperationsData';
 
-// Extended Marketing Data with Social Links
+// Marketing Data - will be populated from Meta/TikTok APIs
+// Currently shows placeholders until APIs are connected
 const MARKETING_STATS = {
-  totalSpend: 12450,
-  totalROAS: 4.2,
-  cac: 12.80,
-  conversions: 2480,
+  totalSpend: null as number | null,
+  totalROAS: null as number | null,
+  cac: null as number | null,
+  conversions: null as number | null,
+  isConnected: false,
   platforms: [
     { 
       name: 'Meta Ads', 
-      spend: 8200, 
-      conversions: 1850, 
-      roas: 4.8, 
-      ctr: '2.4%', 
+      spend: null as number | null, 
+      conversions: null as number | null, 
+      roas: null as number | null, 
+      ctr: null as string | null, 
       color: '#1877F2',
-      profileUrl: 'https://www.facebook.com/boundariescoffee' 
+      profileUrl: 'https://www.facebook.com/boundariescoffee',
+      isConnected: false,
     },
     { 
       name: 'TikTok Ads', 
-      spend: 4250, 
-      conversions: 630, 
-      roas: 3.1, 
-      ctr: '1.8%', 
+      spend: null as number | null, 
+      conversions: null as number | null, 
+      roas: null as number | null, 
+      ctr: null as string | null, 
       color: '#EE1D52',
-      profileUrl: 'https://www.tiktok.com/@boundariescoffee'
+      profileUrl: 'https://www.tiktok.com/@boundariescoffee',
+      isConnected: false,
     }
   ],
-  trends: [
-    { day: 'Mon', spend: 400, rev: 1600 },
-    { day: 'Tue', spend: 450, rev: 1900 },
-    { day: 'Wed', spend: 380, rev: 1550 },
-    { day: 'Thu', spend: 500, rev: 2200 },
-    { day: 'Fri', spend: 600, rev: 2800 },
-    { day: 'Sat', spend: 700, rev: 3200 },
-    { day: 'Sun', spend: 550, rev: 2400 },
-  ]
+  trends: [] as any[],
 };
 
 const SidebarItem = ({ label, active = false, onClick, icon }: { label: string, active?: boolean, onClick: () => void, icon: React.ReactNode }) => (
@@ -65,16 +63,49 @@ const App: React.FC = () => {
   // Location filter hook
   const { location, setLocation, locations } = useLocationFilter();
 
-  // Fetch real data from Toast API via Logbook
+  // Fetch real data from Toast APIs
   const { data, loading, error, refetch, isLiveData } = useToastData(period, location);
+  const { data: laborApiData, loading: laborLoading } = useLaborData(period, location);
+  const { data: opsApiData, loading: opsLoading } = useOperationsData(period, location);
 
-  // Use API data if available, fallback to mock data
-  const revenueData = data?.revenueMetrics || REVENUE_DATA[period];
-  const operationalData = data?.operationalMetrics || OPERATIONAL_DATA;
-  const laborData = data?.laborMetrics || LABOR_DATA;
-  const experienceData = data?.experienceMetrics || EXPERIENCE_DATA;
-  const shiftLeads = data?.shiftLeads || SHIFT_LEADS;
-  const hourlyData = data?.hourlyData || REVENUE_CHART_DATA;
+  // Use API data - no fallbacks to mock data
+  const revenueData = data?.revenueMetrics || { netRevenue: { value: 0, change: 0 }, sssg: { value: 0, change: 0 }, guestCount: { value: 0, change: 0 }, avgTicket: { value: 0, change: 0 } };
+  
+  // Build operational data from real API
+  const operationalData = {
+    avgTripTime: { value: opsApiData?.avgTripTime || 0, change: 0, target: 210, status: 'green' as const },
+    p90TripTime: { value: opsApiData?.p90TripTime || 0, change: 0, target: 270, status: 'green' as const },
+    carsPerHour: { value: opsApiData?.carsPerHour || 0, change: 0, target: 45, status: 'yellow' as const },
+    ordersPerLaborHour: { value: laborApiData?.revPerLaborHour ? Math.round(laborApiData.totalSales / laborApiData.totalLaborHours / 10) : 0, change: 0, target: 20, status: 'yellow' as const },
+  };
+  
+  // Build labor data from real API
+  const laborData = {
+    laborPercent: { value: laborApiData?.laborPercent || 0, change: 0 },
+    revPerLaborHour: { value: laborApiData?.revPerLaborHour || 0, change: 0 },
+    laborVariance: { value: 0, change: 0 }, // Would need budget comparison
+    callOutRate: { value: 0, change: 0 }, // Would need scheduling data
+  };
+  
+  // Build experience data from real API
+  const experienceData = {
+    googleRating: { value: 4.9, change: 0 }, // TODO: Need GBP API
+    fiveStarReviews: { value: 597, change: 0 }, // TODO: Need GBP API  
+    reviewVelocity: { value: 0, change: 0 }, // TODO: Need GBP API
+    refundRemakeRate: { value: opsApiData?.refundRate || 0, change: 0 },
+  };
+  
+  // Build shift leads from labor API
+  const shiftLeads = (laborApiData?.topEmployees || []).slice(0, 3).map((emp, i) => ({
+    id: emp.guid || String(i),
+    name: emp.name || 'Unknown',
+    avgTicket: revenueData.avgTicket.value,
+    avgTripTime: operationalData.avgTripTime.value,
+    salesPerLaborHour: laborApiData?.revPerLaborHour || 0,
+  }));
+  
+  // Use real hourly data from operations API
+  const hourlyData = opsApiData?.hourlyData || [];
 
   const [refreshInterval, setRefreshInterval] = useState(30000);
   const [lastSync, setLastSync] = useState(new Date());
@@ -109,10 +140,16 @@ const App: React.FC = () => {
   const renderDashboard = () => (
     <div className="space-y-10 animate-in fade-in duration-500">
       {/* Data source indicator */}
-      {!isLiveData && (
+      {(loading || laborLoading || opsLoading) && (
+        <div className="bg-blue-50 border border-blue-200 text-blue-800 px-4 py-2 rounded-xl text-sm flex items-center space-x-2">
+          <svg className="w-4 h-4 animate-spin" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15"></path></svg>
+          <span>Loading real-time data from Toast POS...</span>
+        </div>
+      )}
+      {!loading && !laborLoading && !opsLoading && !isLiveData && (
         <div className="bg-amber-50 border border-amber-200 text-amber-800 px-4 py-2 rounded-xl text-sm flex items-center space-x-2">
           <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M12 9v2m0 4h.01m-6.938 4h13.856c1.54 0 2.502-1.667 1.732-3L13.732 4c-.77-1.333-2.694-1.333-3.464 0L3.34 16c-.77 1.333.192 3 1.732 3z"></path></svg>
-          <span>Showing sample data - API connection pending</span>
+          <span>Unable to fetch live data - check API connection</span>
         </div>
       )}
 
@@ -263,11 +300,25 @@ const App: React.FC = () => {
 
   const renderMarketing = () => (
     <div className="space-y-10 animate-in fade-in slide-in-from-right-4 duration-500">
+      {/* API Connection Required Banner */}
+      <div className="bg-amber-50 border border-amber-200 text-amber-800 px-6 py-4 rounded-xl flex items-center justify-between">
+        <div className="flex items-center space-x-3">
+          <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M13 10V3L4 14h7v7l9-11h-7z"></path></svg>
+          <div>
+            <span className="font-bold">Marketing APIs Not Connected</span>
+            <p className="text-sm text-amber-600">Connect Meta Ads and TikTok Ads to see real marketing data</p>
+          </div>
+        </div>
+        <button className="px-4 py-2 bg-amber-600 text-white rounded-lg text-sm font-bold hover:bg-amber-700 transition-colors">
+          Connect APIs
+        </button>
+      </div>
+
       <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-6">
-        <StatCard label="Ad Spend (MTD)" value={MARKETING_STATS.totalSpend} change={12} isCurrency icon={<svg fill="none" stroke="currentColor" viewBox="0 0 24 24" className="w-4 h-4"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M15 12a3 3 0 11-6 0 3 3 0 016 0z"></path><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M2.458 12C3.732 7.943 7.523 5 12 5c4.478 0 8.268 2.943 9.542 7-1.274 4.057-5.064 7-9.542 7-4.477 0-8.268-2.943-9.542-7z"></path></svg>} />
-        <StatCard label="Marketing ROAS" value={MARKETING_STATS.totalROAS} change={8.5} icon={<svg fill="none" stroke="currentColor" viewBox="0 0 24 24" className="w-4 h-4"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M13 7h8m0 0v8m0-8l-8 8-4-4-6 6"></path></svg>} />
-        <StatCard label="Customer CAC" value={MARKETING_STATS.cac} change={-5.2} isCurrency icon={<svg fill="none" stroke="currentColor" viewBox="0 0 24 24" className="w-4 h-4"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M16 7a4 4 0 11-8 0 4 4 0 018 0zM12 14a7 7 0 00-7 7h14a7 7 0 00-7-7z"></path></svg>} />
-        <StatCard label="Conversions" value={MARKETING_STATS.conversions} change={24} icon={<svg fill="none" stroke="currentColor" viewBox="0 0 24 24" className="w-4 h-4"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M9 12l2 2 4-4m6 2a9 9 0 11-18 0 9 9 0 0118 0z"></path></svg>} />
+        <StatCard label="Ad Spend (MTD)" value={MARKETING_STATS.totalSpend ?? '—'} change={0} isCurrency={!!MARKETING_STATS.totalSpend} icon={<svg fill="none" stroke="currentColor" viewBox="0 0 24 24" className="w-4 h-4"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M15 12a3 3 0 11-6 0 3 3 0 016 0z"></path><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M2.458 12C3.732 7.943 7.523 5 12 5c4.478 0 8.268 2.943 9.542 7-1.274 4.057-5.064 7-9.542 7-4.477 0-8.268-2.943-9.542-7z"></path></svg>} />
+        <StatCard label="Marketing ROAS" value={MARKETING_STATS.totalROAS ?? '—'} change={0} icon={<svg fill="none" stroke="currentColor" viewBox="0 0 24 24" className="w-4 h-4"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M13 7h8m0 0v8m0-8l-8 8-4-4-6 6"></path></svg>} />
+        <StatCard label="Customer CAC" value={MARKETING_STATS.cac ?? '—'} change={0} isCurrency={!!MARKETING_STATS.cac} icon={<svg fill="none" stroke="currentColor" viewBox="0 0 24 24" className="w-4 h-4"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M16 7a4 4 0 11-8 0 4 4 0 018 0zM12 14a7 7 0 00-7 7h14a7 7 0 00-7-7z"></path></svg>} />
+        <StatCard label="Conversions" value={MARKETING_STATS.conversions ?? '—'} change={0} icon={<svg fill="none" stroke="currentColor" viewBox="0 0 24 24" className="w-4 h-4"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M9 12l2 2 4-4m6 2a9 9 0 11-18 0 9 9 0 0118 0z"></path></svg>} />
       </div>
 
       <div className="grid grid-cols-1 lg:grid-cols-3 gap-8">
