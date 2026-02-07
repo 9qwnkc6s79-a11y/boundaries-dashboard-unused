@@ -4,7 +4,7 @@ import {
   BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer, LineChart, Line, AreaChart, Area, Cell, PieChart, Pie
 } from 'recharts';
 import {
-  REVENUE_DATA, OPERATIONAL_DATA, SHIFT_LEADS, REVENUE_CHART_DATA, LABOR_DATA, EXPERIENCE_DATA
+  REVENUE_DATA, OPERATIONAL_DATA, SHIFT_LEADS, REVENUE_CHART_DATA, LABOR_DATA, EXPERIENCE_DATA, BUDGET_DATA, FORECAST_DATA
 } from './mockData';
 import StatCard from './components/StatCard';
 import ShiftLeadTable from './components/ShiftLeadTable';
@@ -344,6 +344,169 @@ const App: React.FC = () => {
     </div>
   );
 
+  const renderFinancials = () => {
+    const budget = BUDGET_DATA.currentMonth;
+    const forecast = FORECAST_DATA;
+    const pctComplete = Math.round((budget.daysElapsed / budget.daysInMonth) * 100);
+    const paceToHitBudget = (budget.actual / budget.daysElapsed) * budget.daysInMonth;
+    const projectedVariance = paceToHitBudget - budget.budget;
+    const isOnPace = paceToHitBudget >= budget.budget;
+
+    return (
+      <div className="space-y-10 animate-in fade-in slide-in-from-right-4 duration-500">
+        {/* Budget vs Actual Header Cards */}
+        <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-6">
+          <StatCard 
+            label="MTD Revenue" 
+            value={budget.actual} 
+            change={((budget.actual / (budget.budget * pctComplete / 100)) - 1) * 100} 
+            isCurrency 
+            icon={<svg fill="none" stroke="currentColor" viewBox="0 0 24 24" className="w-4 h-4"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M12 8c-1.657 0-3 .895-3 2s1.343 2 3 2 3 .895 3 2-1.343 2-3 2m0-8c1.11 0 2.08.402 2.599 1M12 8V7m0 1v8m0 0v1m0-1c-1.11 0-2.08-.402-2.599-1M21 12a9 9 0 11-18 0 9 9 0 0118 0z"></path></svg>} 
+          />
+          <StatCard 
+            label="Monthly Budget" 
+            value={budget.budget} 
+            change={0} 
+            isCurrency 
+            icon={<svg fill="none" stroke="currentColor" viewBox="0 0 24 24" className="w-4 h-4"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M9 5H7a2 2 0 00-2 2v12a2 2 0 002 2h10a2 2 0 002-2V7a2 2 0 00-2-2h-2M9 5a2 2 0 002 2h2a2 2 0 002-2M9 5a2 2 0 012-2h2a2 2 0 012 2"></path></svg>} 
+          />
+          <StatCard 
+            label="EOM Projection" 
+            value={Math.round(paceToHitBudget)} 
+            change={Math.round((projectedVariance / budget.budget) * 100)} 
+            isCurrency 
+            icon={<svg fill="none" stroke="currentColor" viewBox="0 0 24 24" className="w-4 h-4"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M13 7h8m0 0v8m0-8l-8 8-4-4-6 6"></path></svg>} 
+          />
+          <StatCard 
+            label="Confidence" 
+            value={`${forecast.eomProjection.confidence}%`} 
+            change={5} 
+            icon={<svg fill="none" stroke="currentColor" viewBox="0 0 24 24" className="w-4 h-4"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M9 12l2 2 4-4m6 2a9 9 0 11-18 0 9 9 0 0118 0z"></path></svg>} 
+          />
+        </div>
+
+        {/* Budget Progress & Forecast */}
+        <div className="grid grid-cols-1 lg:grid-cols-3 gap-8">
+          {/* Budget Progress */}
+          <div className="lg:col-span-2 glass-card p-8 rounded-2xl">
+            <div className="flex justify-between items-center mb-6">
+              <h3 className="text-lg font-bold text-slate-900">Budget vs Actual (February)</h3>
+              <span className={`text-[10px] font-bold uppercase tracking-widest px-3 py-1 rounded-full ${isOnPace ? 'bg-emerald-50 text-emerald-600' : 'bg-amber-50 text-amber-600'}`}>
+                {isOnPace ? 'On Track' : 'Behind Pace'}
+              </span>
+            </div>
+            
+            {/* Progress Bar */}
+            <div className="mb-8">
+              <div className="flex justify-between text-sm mb-2">
+                <span className="font-medium text-slate-600">Month Progress: {pctComplete}%</span>
+                <span className="font-bold text-slate-900">${budget.actual.toLocaleString()} / ${budget.budget.toLocaleString()}</span>
+              </div>
+              <div className="w-full h-4 bg-slate-100 rounded-full overflow-hidden">
+                <div 
+                  className={`h-full rounded-full transition-all ${isOnPace ? 'bg-emerald-500' : 'bg-amber-500'}`}
+                  style={{ width: `${Math.min((budget.actual / budget.budget) * 100, 100)}%` }}
+                ></div>
+              </div>
+              <div className="flex justify-between text-xs mt-2 text-slate-400">
+                <span>Day {budget.daysElapsed} of {budget.daysInMonth}</span>
+                <span>Target pace: ${Math.round(budget.budget * pctComplete / 100).toLocaleString()}</span>
+              </div>
+            </div>
+
+            {/* Weekly Trend Chart */}
+            <h4 className="text-sm font-bold text-slate-700 mb-4">Weekly Performance</h4>
+            <div className="h-[200px]">
+              <ResponsiveContainer width="100%" height="100%">
+                <BarChart data={forecast.weeklyTrend}>
+                  <CartesianGrid strokeDasharray="0" vertical={false} stroke="#f1f5f9" />
+                  <XAxis dataKey="week" axisLine={false} tickLine={false} tick={{fontSize: 10, fill: '#94a3b8'}} />
+                  <YAxis hide />
+                  <Tooltip 
+                    formatter={(value: any) => value ? `$${value.toLocaleString()}` : 'N/A'}
+                    contentStyle={{ borderRadius: '12px', border: 'none', boxShadow: '0 4px 12px rgba(0,0,0,0.05)' }}
+                  />
+                  <Bar dataKey="budget" name="Budget" fill="#e2e8f0" radius={[4, 4, 4, 4]} barSize={30} />
+                  <Bar dataKey="actual" name="Actual" fill="#3b82f6" radius={[4, 4, 4, 4]} barSize={30} />
+                  <Bar dataKey="forecast" name="Forecast" fill="#93c5fd" radius={[4, 4, 4, 4]} barSize={30} />
+                </BarChart>
+              </ResponsiveContainer>
+            </div>
+          </div>
+
+          {/* Forecast Summary */}
+          <div className="glass-card p-8 rounded-2xl flex flex-col">
+            <h3 className="text-lg font-bold text-slate-900 mb-6">End of Month Forecast</h3>
+            
+            <div className="flex-grow flex flex-col justify-center">
+              {/* Projection Gauge */}
+              <div className="text-center mb-8">
+                <div className="text-4xl font-black text-slate-900">${Math.round(paceToHitBudget).toLocaleString()}</div>
+                <div className="text-sm text-slate-500 mt-1">Projected Revenue</div>
+                <div className={`text-sm font-bold mt-2 ${projectedVariance >= 0 ? 'text-emerald-500' : 'text-rose-500'}`}>
+                  {projectedVariance >= 0 ? '+' : ''}${Math.round(projectedVariance).toLocaleString()} vs budget
+                </div>
+              </div>
+
+              {/* Range */}
+              <div className="bg-slate-50 p-4 rounded-xl mb-6">
+                <div className="text-[10px] font-bold text-slate-400 uppercase tracking-widest mb-3">Projection Range</div>
+                <div className="flex justify-between items-center">
+                  <div className="text-center">
+                    <div className="text-xs text-slate-400">Worst</div>
+                    <div className="text-sm font-bold text-slate-600">${forecast.eomProjection.worstCase.toLocaleString()}</div>
+                  </div>
+                  <div className="flex-grow mx-4 h-2 bg-gradient-to-r from-rose-200 via-amber-200 to-emerald-200 rounded-full"></div>
+                  <div className="text-center">
+                    <div className="text-xs text-slate-400">Best</div>
+                    <div className="text-sm font-bold text-slate-600">${forecast.eomProjection.bestCase.toLocaleString()}</div>
+                  </div>
+                </div>
+              </div>
+
+              {/* Daily Metrics */}
+              <div className="space-y-3">
+                <div className="flex justify-between items-center p-3 bg-slate-50 rounded-xl">
+                  <span className="text-sm text-slate-600">Avg Daily Revenue</span>
+                  <span className="font-bold text-slate-900">${forecast.dailyMetrics.avgDailyRevenue.toLocaleString()}</span>
+                </div>
+                <div className="flex justify-between items-center p-3 bg-slate-50 rounded-xl">
+                  <span className="text-sm text-slate-600">Daily Target</span>
+                  <span className="font-bold text-slate-900">${forecast.dailyMetrics.requiredDailyToHitBudget.toLocaleString()}</span>
+                </div>
+                <div className="flex justify-between items-center p-3 bg-emerald-50 rounded-xl">
+                  <span className="text-sm text-emerald-700">Trend</span>
+                  <span className="font-bold text-emerald-600">↑ {forecast.dailyMetrics.trendPct}%</span>
+                </div>
+              </div>
+            </div>
+          </div>
+        </div>
+
+        {/* Expense Breakdown */}
+        <div className="glass-card p-8 rounded-2xl">
+          <h3 className="text-lg font-bold text-slate-900 mb-6">Expense Breakdown (MTD)</h3>
+          <div className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-6 gap-4">
+            {Object.entries(BUDGET_DATA.expenses).map(([key, exp]) => (
+              <div key={key} className="p-4 bg-slate-50 rounded-xl">
+                <div className="text-[10px] font-bold text-slate-400 uppercase tracking-widest mb-2">{key}</div>
+                <div className="text-lg font-black text-slate-900">${exp.actual.toLocaleString()}</div>
+                <div className="text-xs text-slate-500">of ${exp.budget.toLocaleString()}</div>
+                <div className="mt-2 w-full h-1.5 bg-slate-200 rounded-full overflow-hidden">
+                  <div 
+                    className={`h-full rounded-full ${(exp.actual / exp.budget) > 0.9 ? 'bg-amber-500' : 'bg-blue-500'}`}
+                    style={{ width: `${Math.min((exp.actual / exp.budget) * 100, 100)}%` }}
+                  ></div>
+                </div>
+                <div className="text-[10px] text-slate-400 mt-1">{exp.pctOfRevenue}% of rev</div>
+              </div>
+            ))}
+          </div>
+        </div>
+      </div>
+    );
+  };
+
   return (
     <div className="flex h-screen overflow-hidden bg-[#f8f9fb]">
       <aside className="w-64 bg-[#11141d] text-white flex flex-col p-6 space-y-8 hidden md:flex">
@@ -359,6 +522,7 @@ const App: React.FC = () => {
           <SidebarItem label="Dashboard" active={activeTab === 'Dashboard'} onClick={() => setActiveTab('Dashboard')} icon={<svg fill="none" stroke="currentColor" viewBox="0 0 24 24" className="w-5 h-5"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M3 12l2-2m0 0l7-7 7 7M5 10v10a1 1 0 001 1h3m10-11l2 2m-2-2v10a1 1 0 01-1 1h-3m-6 0a1 1 0 001-1v-4a1 1 0 011-1h2a1 1 0 011 1v4a1 1 0 001 1m-6 0h6"></path></svg>} />
           <SidebarItem label="Ops Health" active={activeTab === 'Ops Health'} onClick={() => setActiveTab('Ops Health')} icon={<svg fill="none" stroke="currentColor" viewBox="0 0 24 24" className="w-5 h-5"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M9 19v-6a2 2 0 00-2-2H5a2 2 0 00-2 2v6a2 2 0 002 2h2a2 2 0 002-2zm0 0V9a2 2 0 012-2h2a2 2 0 012 2v10m-6 0a2 2 0 002 2h2a2 2 0 002-2m0 0V5a2 2 0 012-2h2a2 2 0 012 2v14a2 2 0 01-2 2h-2a2 2 0 01-2-2z"></path></svg>} />
           <SidebarItem label="Marketing" active={activeTab === 'Marketing'} onClick={() => setActiveTab('Marketing')} icon={<svg fill="none" stroke="currentColor" viewBox="0 0 24 24" className="w-5 h-5"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M11 5.882V19.24a1.76 1.76 0 01-3.417.592l-2.147-6.167H3.3a1.598 1.598 0 01-2.978-1.586l1.241-3.116A1.598 1.598 0 013.3 8.32h2.533l2.147-6.167a1.76 1.76 0 013.417.592z"></path></svg>} />
+          <SidebarItem label="Financials" active={activeTab === 'Financials'} onClick={() => setActiveTab('Financials')} icon={<svg fill="none" stroke="currentColor" viewBox="0 0 24 24" className="w-5 h-5"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M9 7h6m0 10v-3m-3 3h.01M9 17h.01M9 14h.01M12 14h.01M15 11h.01M12 11h.01M9 11h.01M7 21h10a2 2 0 002-2V5a2 2 0 00-2-2H7a2 2 0 00-2 2v14a2 2 0 002 2z"></path></svg>} />
         </nav>
 
         <div className="pt-8 border-t border-slate-800">
@@ -412,6 +576,7 @@ const App: React.FC = () => {
           {activeTab === 'Dashboard' && renderDashboard()}
           {activeTab === 'Ops Health' && renderOpsHealth()}
           {activeTab === 'Marketing' && renderMarketing()}
+          {activeTab === 'Financials' && renderFinancials()}
         </main>
         
         <footer className="px-10 py-10 mt-auto border-t border-slate-100 bg-white/50">

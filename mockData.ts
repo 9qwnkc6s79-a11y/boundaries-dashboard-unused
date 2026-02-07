@@ -64,3 +64,62 @@ export const REVENUE_CHART_DATA = [
   { time: '11:00', revenue: 380, transactions: 42 },
   { time: '12:00', revenue: 520, transactions: 60 }
 ];
+
+// Financial/Budget Data
+export const BUDGET_DATA = {
+  // Monthly budgets for 2026
+  monthly: {
+    january: { revenue: 180000, labor: 40000, cogs: 54000, marketing: 8000, other: 25000 },
+    february: { revenue: 175000, labor: 39000, cogs: 52500, marketing: 8500, other: 24000 },
+    march: { revenue: 190000, labor: 42000, cogs: 57000, marketing: 9000, other: 26000 },
+  },
+  // Current month actuals (February)
+  currentMonth: {
+    budget: 175000,
+    actual: 112500, // MTD actual
+    daysElapsed: 7,
+    daysInMonth: 28,
+    dailyTarget: 6250, // 175000 / 28
+  },
+  // Year to date
+  ytd: {
+    budgetRevenue: 355000,
+    actualRevenue: 292500,
+    budgetProfit: 71000,
+    actualProfit: 58500,
+  },
+  // Expense breakdown (current month)
+  expenses: {
+    labor: { budget: 39000, actual: 25200, pctOfRevenue: 22.4 },
+    cogs: { budget: 52500, actual: 33750, pctOfRevenue: 30.0 },
+    marketing: { budget: 8500, actual: 6200, pctOfRevenue: 5.5 },
+    rent: { budget: 12000, actual: 12000, pctOfRevenue: 10.7 },
+    utilities: { budget: 3500, actual: 2100, pctOfRevenue: 1.9 },
+    other: { budget: 8500, actual: 5200, pctOfRevenue: 4.6 },
+  },
+};
+
+// Forecast Data
+export const FORECAST_DATA = {
+  // End of month projection based on current run rate
+  eomProjection: {
+    revenue: 175000, // Projected based on daily average
+    confidence: 85, // % confidence in projection
+    bestCase: 185000,
+    worstCase: 165000,
+  },
+  // Weekly trend for forecasting
+  weeklyTrend: [
+    { week: 'W1', actual: 42500, budget: 43750, forecast: null },
+    { week: 'W2', actual: 45000, budget: 43750, forecast: null },
+    { week: 'W3', actual: 25000, budget: 43750, forecast: 44000 }, // Current week partial
+    { week: 'W4', actual: null, budget: 43750, forecast: 43500 },
+  ],
+  // Daily run rate
+  dailyMetrics: {
+    avgDailyRevenue: 16071, // Based on first 7 days
+    requiredDailyToHitBudget: 6250,
+    trendDirection: 'up',
+    trendPct: 8.2,
+  },
+};
