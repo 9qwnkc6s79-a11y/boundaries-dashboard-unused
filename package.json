@@ -5,6 +5,7 @@
   "type": "module",
   "scripts": {
     "dev": "vite",
+    "dev:api": "npx vercel dev --listen 3000",
     "build": "vite build",
     "preview": "vite preview"
   },
@@ -18,6 +19,7 @@
     "@types/node": "^22.14.0",
     "@vitejs/plugin-react": "^5.0.0",
     "typescript": "~5.8.2",
+    "vercel": "^50.17.1",
     "vite": "^6.2.0"
   }
 }
