@@ -1,6 +1,11 @@
 import path from 'path';
 import { defineConfig, loadEnv } from 'vite';
 import react from '@vitejs/plugin-react';
+import { exec } from 'child_process';
+import { promisify } from 'util';
+import fs from 'fs';
+
+const execAsync = promisify(exec);
 
 // Toast API configuration
 const TOAST_API = 'https://ws-api.toasttab.com';
@@ -343,7 +348,12 @@ function apiPlugin(env: Record<string, string>) {
             lastMonthResults.push({ location: loc, ...lastMonthData });
           }
 
-          // Calculate SSSG
+          // Calculate SSSG - always use MTD (1st of month to today) regardless of selected period
+          const now = new Date();
+          const mtdStart = `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, '0')}-01`;
+          const mtdEnd = `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, '0')}-${String(now.getDate()).padStart(2, '0')}`;
+          const mtdLastYear = getLastYearDates(mtdStart, mtdEnd);
+
           let sssgCurrentTotal = 0;
           let sssgLastYearTotal = 0;
 
@@ -351,21 +361,15 @@ function apiPlugin(env: Record<string, string>) {
             const restaurantGuid = RESTAURANTS[loc];
             if (!restaurantGuid) continue;
 
-            const currentForStore = currentResults.find(r => r.location === loc);
-            if (currentForStore) {
-              sssgCurrentTotal += currentForStore.netSales;
-            }
-
             try {
-              const lastYearData = await getOrdersSummary(
-                restaurantGuid,
-                lastYear.startDate,
-                lastYear.endDate,
-                token
-              );
-              sssgLastYearTotal += lastYearData.netSales;
+              const [currentMtd, lastYearMtd] = await Promise.all([
+                getOrdersSummary(restaurantGuid, mtdStart, mtdEnd, token),
+                getOrdersSummary(restaurantGuid, mtdLastYear.startDate, mtdLastYear.endDate, token),
+              ]);
+              sssgCurrentTotal += currentMtd.netSales;
+              sssgLastYearTotal += lastYearMtd.netSales;
             } catch {
-              // No last year data
+              // No data available
             }
           }
 
@@ -561,6 +565,87 @@ function apiPlugin(env: Record<string, string>) {
         }
       });
 
+      // Toast Daily Sales API (for MTD cumulative chart)
+      server.middlewares.use(async (req: any, res: any, next: any) => {
+        if (!req.url?.startsWith('/api/toast-daily-sales')) {
+          return next();
+        }
+
+        res.setHeader('Content-Type', 'application/json');
+        res.setHeader('Access-Control-Allow-Origin', '*');
+
+        try {
+          const url = new URL(req.url, 'http://localhost');
+          const location = url.searchParams.get('location');
+
+          const now = new Date();
+          const year = now.getFullYear();
+          const month = now.getMonth();
+          const startDate = `${year}-${String(month + 1).padStart(2, '0')}-01`;
+          const endDate = `${year}-${String(month + 1).padStart(2, '0')}-${String(now.getDate()).padStart(2, '0')}`;
+
+          const token = await getAccessToken(env);
+          const locations = location ? [location] : ['littleelm', 'prosper'];
+
+          let allOrders: any[] = [];
+          for (const loc of locations) {
+            const restaurantGuid = RESTAURANTS[loc];
+            if (!restaurantGuid) continue;
+            const orders = await getAllOrders(restaurantGuid, startDate, endDate, token);
+            allOrders.push(...orders);
+          }
+
+          // Bucket orders by day
+          const dailyBuckets = new Map<number, number>();
+          for (const order of allOrders) {
+            if (order.voided) continue;
+            const createdDate = order.createdDate || order.openedDate;
+            if (!createdDate) continue;
+
+            const orderDate = new Date(createdDate);
+            const day = orderDate.getDate();
+
+            let orderAmount = 0;
+            if (order.checks) {
+              for (const check of order.checks) {
+                if (!check.voided && check.paymentStatus === 'CLOSED') {
+                  let checkAmount = check.amount || 0;
+                  if (check.payments) {
+                    for (const payment of check.payments) {
+                      if (payment.refund && payment.refund.refundAmount) {
+                        checkAmount -= payment.refund.refundAmount;
+                      }
+                    }
+                  }
+                  orderAmount += checkAmount;
+                }
+              }
+            }
+
+            dailyBuckets.set(day, (dailyBuckets.get(day) || 0) + orderAmount);
+          }
+
+          // Build response array sorted by day
+          const result = [];
+          for (let day = 1; day <= now.getDate(); day++) {
+            result.push({
+              date: `${year}-${String(month + 1).padStart(2, '0')}-${String(day).padStart(2, '0')}`,
+              day,
+              sales: Math.round((dailyBuckets.get(day) || 0) * 100) / 100,
+            });
+          }
+
+          res.end(JSON.stringify(result));
+        } catch (error) {
+          console.error('Toast daily sales API error:', error);
+          res.statusCode = 500;
+          res.end(JSON.stringify({
+            error: 'Failed to fetch daily sales',
+            details: error instanceof Error ? error.message : 'Unknown error',
+          }));
+        }
+      });
+
       // Toast Operations API
       server.middlewares.use(async (req: any, res: any, next: any) => {
         if (!req.url?.startsWith('/api/toast-operations')) {
@@ -645,6 +730,275 @@ function apiPlugin(env: Record<string, string>) {
             error: 'Failed to fetch operational data',
             details: error instanceof Error ? error.message : 'Unknown error',
             isLiveData: false,
+          }));
+        }
+      });
+
+      // ==========================================
+      // OpenClaw + Bland AI APIs
+      // ==========================================
+
+      // OpenClaw Sessions — list all agent sessions
+      server.middlewares.use(async (req: any, res: any, next: any) => {
+        if (!req.url?.startsWith('/api/openclaw-sessions')) {
+          return next();
+        }
+
+        res.setHeader('Content-Type', 'application/json');
+        res.setHeader('Access-Control-Allow-Origin', '*');
+
+        try {
+          // Try CLI first
+          const { stdout } = await execAsync('openclaw sessions --json', { timeout: 10000 });
+          const sessions = JSON.parse(stdout);
+
+          // Normalize to array format
+          const result = Array.isArray(sessions)
+            ? sessions
+            : Object.entries(sessions).map(([key, val]: [string, any]) => ({
+                sessionKey: key,
+                ...(typeof val === 'object' ? val : {}),
+              }));
+
+          res.end(JSON.stringify(result));
+        } catch (cliError) {
+          // Fallback: read session files directly
+          try {
+            const agentsDir = path.join(process.env.HOME || '~', '.openclaw', 'agents');
+            const sessions: any[] = [];
+
+            if (fs.existsSync(agentsDir)) {
+              const agents = fs.readdirSync(agentsDir);
+              for (const agentId of agents) {
+                const sessionsFile = path.join(agentsDir, agentId, 'sessions', 'sessions.json');
+                if (fs.existsSync(sessionsFile)) {
+                  const data = JSON.parse(fs.readFileSync(sessionsFile, 'utf-8'));
+                  for (const [key, val] of Object.entries(data)) {
+                    sessions.push({
+                      sessionKey: key,
+                      agentId,
+                      ...(typeof val === 'object' && val !== null ? val : {}),
+                    });
+                  }
+                }
+              }
+            }
+
+            res.end(JSON.stringify(sessions));
+          } catch (fsError) {
+            console.error('OpenClaw sessions error:', cliError, fsError);
+            res.end(JSON.stringify([]));
+          }
+        }
+      });
+
+      // OpenClaw Chat — send message to agent via HTTP API
+      server.middlewares.use(async (req: any, res: any, next: any) => {
+        if (!req.url?.startsWith('/api/openclaw-chat') || req.method !== 'POST') {
+          return next();
+        }
+
+        res.setHeader('Content-Type', 'application/json');
+        res.setHeader('Access-Control-Allow-Origin', '*');
+
+        try {
+          const body = await new Promise<any>((resolve) => {
+            let data = '';
+            req.on('data', (chunk: any) => (data += chunk));
+            req.on('end', () => resolve(JSON.parse(data)));
+          });
+
+          const gatewayUrl = env.OPENCLAW_GATEWAY_URL || 'http://localhost:18789';
+          const gatewayToken = env.OPENCLAW_GATEWAY_TOKEN || '';
+
+          const response = await fetch(`${gatewayUrl}/v1/chat/completions`, {
+            method: 'POST',
+            headers: {
+              'Content-Type': 'application/json',
+              ...(gatewayToken ? { 'Authorization': `Bearer ${gatewayToken}` } : {}),
+              ...(body.agentId ? { 'x-openclaw-agent-id': body.agentId } : {}),
+              ...(body.sessionKey ? { 'x-openclaw-session-key': body.sessionKey } : {}),
+            },
+            body: JSON.stringify({
+              model: body.agentId ? `openclaw:${body.agentId}` : 'openclaw',
+              messages: [{ role: 'user', content: body.message }],
+            }),
+          });
+
+          if (!response.ok) {
+            const errText = await response.text();
+            throw new Error(`Gateway returned ${response.status}: ${errText}`);
+          }
+
+          const result = await response.json();
+          const content = result.choices?.[0]?.message?.content || '';
+          res.end(JSON.stringify({ content, raw: result }));
+        } catch (error) {
+          console.error('OpenClaw chat error:', error);
+          res.statusCode = 500;
+          res.end(JSON.stringify({
+            error: 'Chat failed',
+            details: error instanceof Error ? error.message : 'Unknown error',
+          }));
+        }
+      });
+
+      // OpenClaw History — read JSONL transcript files
+      server.middlewares.use(async (req: any, res: any, next: any) => {
+        if (!req.url?.startsWith('/api/openclaw-history')) {
+          return next();
+        }
+
+        res.setHeader('Content-Type', 'application/json');
+        res.setHeader('Access-Control-Allow-Origin', '*');
+
+        try {
+          const url = new URL(req.url, 'http://localhost');
+          const agentId = url.searchParams.get('agentId');
+          const sessionId = url.searchParams.get('sessionId');
+          const limit = parseInt(url.searchParams.get('limit') || '50');
+
+          if (!agentId || !sessionId) {
+            res.statusCode = 400;
+            res.end(JSON.stringify({ error: 'agentId and sessionId required' }));
+            return;
+          }
+
+          const sessionsDir = path.join(process.env.HOME || '~', '.openclaw', 'agents', agentId, 'sessions');
+          const transcriptFile = path.join(sessionsDir, `${sessionId}.jsonl`);
+
+          const messages: any[] = [];
+
+          if (fs.existsSync(transcriptFile)) {
+            const content = fs.readFileSync(transcriptFile, 'utf-8');
+            const lines = content.trim().split('\n').filter(Boolean);
+
+            // Parse JSONL lines — extract user/assistant messages
+            for (const line of lines) {
+              try {
+                const entry = JSON.parse(line);
+                if (entry.role === 'user' || entry.role === 'assistant') {
+                  messages.push({
+                    role: entry.role,
+                    content: typeof entry.content === 'string' ? entry.content : JSON.stringify(entry.content),
+                    timestamp: entry.timestamp || entry.created_at,
+                  });
+                }
+              } catch {
+                // Skip malformed lines
+              }
+            }
+          }
+
+          // Return last N messages
+          res.end(JSON.stringify(messages.slice(-limit)));
+        } catch (error) {
+          console.error('OpenClaw history error:', error);
+          res.statusCode = 500;
+          res.end(JSON.stringify({ error: 'Failed to read history' }));
+        }
+      });
+
+      // Bland AI Calls — list or initiate calls
+      server.middlewares.use(async (req: any, res: any, next: any) => {
+        if (!req.url?.startsWith('/api/bland-calls')) {
+          return next();
+        }
+
+        res.setHeader('Content-Type', 'application/json');
+        res.setHeader('Access-Control-Allow-Origin', '*');
+
+        const blandKey = env.BLAND_API_KEY;
+        if (!blandKey) {
+          res.statusCode = 500;
+          res.end(JSON.stringify({ error: 'BLAND_API_KEY not configured' }));
+          return;
+        }
+
+        try {
+          if (req.method === 'POST') {
+            // Initiate a call
+            const body = await new Promise<any>((resolve) => {
+              let data = '';
+              req.on('data', (chunk: any) => (data += chunk));
+              req.on('end', () => resolve(JSON.parse(data)));
+            });
+
+            const response = await fetch('https://api.bland.ai/v1/calls', {
+              method: 'POST',
+              headers: {
+                'Content-Type': 'application/json',
+                'authorization': blandKey,
+              },
+              body: JSON.stringify({
+                phone_number: body.phone_number,
+                task: body.task || 'You are a helpful assistant for Boundaries Coffee.',
+              }),
+            });
+
+            const result = await response.json();
+            res.end(JSON.stringify(result));
+          } else {
+            // List recent calls
+            const response = await fetch('https://api.bland.ai/v1/calls', {
+              headers: { 'authorization': blandKey },
+            });
+
+            const result = await response.json();
+            res.end(JSON.stringify(result));
+          }
+        } catch (error) {
+          console.error('Bland AI calls error:', error);
+          res.statusCode = 500;
+          res.end(JSON.stringify({
+            error: 'Bland AI request failed',
+            details: error instanceof Error ? error.message : 'Unknown error',
+          }));
+        }
+      });
+
+      // Bland AI Call Details
+      server.middlewares.use(async (req: any, res: any, next: any) => {
+        if (!req.url?.startsWith('/api/bland-call')) {
+          return next();
+        }
+        // Skip if it matched bland-calls above
+        if (req.url?.startsWith('/api/bland-calls')) {
+          return next();
+        }
+
+        res.setHeader('Content-Type', 'application/json');
+        res.setHeader('Access-Control-Allow-Origin', '*');
+
+        const blandKey = env.BLAND_API_KEY;
+        if (!blandKey) {
+          res.statusCode = 500;
+          res.end(JSON.stringify({ error: 'BLAND_API_KEY not configured' }));
+          return;
+        }
+
+        try {
+          const url = new URL(req.url, 'http://localhost');
+          const callId = url.searchParams.get('id');
+
+          if (!callId) {
+            res.statusCode = 400;
+            res.end(JSON.stringify({ error: 'id parameter required' }));
+            return;
+          }
+
+          const response = await fetch(`https://api.bland.ai/v1/calls/${callId}`, {
+            headers: { 'authorization': blandKey },
+          });
+
+          const result = await response.json();
+          res.end(JSON.stringify(result));
+        } catch (error) {
+          console.error('Bland AI call details error:', error);
+          res.statusCode = 500;
+          res.end(JSON.stringify({
+            error: 'Failed to fetch call details',
+            details: error instanceof Error ? error.message : 'Unknown error',
           }));
         }
       });

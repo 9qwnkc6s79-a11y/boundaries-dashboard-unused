@@ -85,15 +85,20 @@ export function useToastData(period: Period = 'Today', location?: Location) {
     } catch (err) {
       console.error('Failed to fetch Toast data:', err);
       setError(err instanceof Error ? err : new Error('Unknown error'));
-      // Fallback to mock data
+      // Fallback to N/A - no fake data
       setData({
-        revenueMetrics: REVENUE_DATA[period],
-        operationalMetrics: OPERATIONAL_DATA,
-        laborMetrics: LABOR_DATA,
-        experienceMetrics: EXPERIENCE_DATA,
-        shiftLeads: SHIFT_LEADS,
-        revenueMix: REVENUE_MIX,
-        hourlyData: REVENUE_CHART_DATA,
+        revenueMetrics: {
+          netRevenue: { value: 0, change: 0 },
+          sssg: { value: 0, change: 0 },
+          guestCount: { value: 0, change: 0 },
+          avgTicket: { value: 0, change: 0 },
+        },
+        operationalMetrics: null,
+        laborMetrics: null,
+        experienceMetrics: null,
+        shiftLeads: [],
+        revenueMix: [],
+        hourlyData: [],
         isLiveData: false,
       });
       setIsLiveData(false);
