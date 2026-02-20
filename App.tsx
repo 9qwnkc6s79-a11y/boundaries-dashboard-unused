@@ -15,41 +15,10 @@ import { useOperationsData } from './src/hooks/useOperationsData';
 import { useBudgetData, type Month } from './src/hooks/useBudgetData';
 import { useDailySalesData } from './src/hooks/useDailySalesData';
 import type { DailySales } from './src/hooks/useDailySalesData';
+import { useMetaAds, type MetaPeriod } from './src/hooks/useMetaAds';
 import { useOpenClawSessions, useOpenClawChat, useOpenClawHistory, type OpenClawSession, type ChatMessage } from './src/hooks/useOpenClaw';
 import { useBlandCalls, useInitiateCall, type BlandCall } from './src/hooks/useBlandCalls';
 
-// Marketing Data - will be populated from Meta/TikTok APIs
-// Currently shows placeholders until APIs are connected
-const MARKETING_STATS = {
-  totalSpend: null as number | null,
-  totalROAS: null as number | null,
-  cac: null as number | null,
-  conversions: null as number | null,
-  isConnected: false,
-  platforms: [
-    { 
-      name: 'Meta Ads', 
-      spend: null as number | null, 
-      conversions: null as number | null, 
-      roas: null as number | null, 
-      ctr: null as string | null, 
-      color: '#1877F2',
-      profileUrl: 'https://www.facebook.com/boundariescoffee',
-      isConnected: false,
-    },
-    { 
-      name: 'TikTok Ads', 
-      spend: null as number | null, 
-      conversions: null as number | null, 
-      roas: null as number | null, 
-      ctr: null as string | null, 
-      color: '#EE1D52',
-      profileUrl: 'https://www.tiktok.com/@boundariescoffee',
-      isConnected: false,
-    }
-  ],
-  trends: [] as any[],
-};
 
 const SidebarItem = ({ label, active = false, onClick, icon }: { label: string, active?: boolean, onClick: () => void, icon: React.ReactNode }) => (
   <div
@@ -74,6 +43,11 @@ const App: React.FC = () => {
   const { data: opsApiData, loading: opsLoading } = useOperationsData(period, location);
   const { budgets, updateBudget, getBudgetForMonth, MONTHS } = useBudgetData();
   const { data: dailySalesData } = useDailySalesData(location);
+
+  // Marketing hooks
+  const [metaPeriod, setMetaPeriod] = useState<MetaPeriod>('7d');
+  const { data: metaData, loading: metaLoading, error: metaError } = useMetaAds(metaPeriod);
+  const metaConnected = !!metaData?.summary;
 
   // Team page hooks
   const { sessions: openClawSessions, loading: sessionsLoading } = useOpenClawSessions();
@@ -465,102 +439,197 @@ const App: React.FC = () => {
     );
   };
 
-  const renderMarketing = () => (
+  const renderMarketing = () => {
+    const s = metaData?.summary;
+    const campaigns = metaData?.campaigns || [];
+    const dailyData = metaData?.dailyData || [];
+
+    return (
     <div className="space-y-10 animate-in fade-in slide-in-from-right-4 duration-500">
-      {/* API Connection Required Banner */}
-      <div className="bg-amber-500/10 border border-amber-500/20 text-amber-400 px-6 py-4 rounded-xl flex items-center justify-between">
-        <div className="flex items-center space-x-3">
-          <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M13 10V3L4 14h7v7l9-11h-7z"></path></svg>
-          <div>
-            <span className="font-bold text-amber-300">Marketing APIs Not Connected</span>
-            <p className="text-sm text-amber-400/80">Connect Meta Ads and TikTok Ads to see real marketing data</p>
+      {/* Status banner */}
+      <div className="h-10 flex items-center">
+        {metaLoading ? (
+          <div className="bg-blue-500/10 border border-blue-500/20 text-blue-400 px-4 py-2 rounded-xl text-sm flex items-center space-x-2 w-full">
+            <svg className="w-4 h-4 animate-spin" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15"></path></svg>
+            <span>Loading Meta Ads data...</span>
           </div>
+        ) : metaError ? (
+          <div className="bg-rose-500/10 border border-rose-500/20 text-rose-400 px-4 py-2 rounded-xl text-sm flex items-center space-x-2 w-full">
+            <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M12 9v2m0 4h.01m-6.938 4h13.856c1.54 0 2.502-1.667 1.732-3L13.732 4c-.77-1.333-2.694-1.333-3.464 0L3.34 16c-.77 1.333.192 3 1.732 3z"></path></svg>
+            <span>Meta API error — check access token</span>
+          </div>
+        ) : null}
+      </div>
+
+      {/* Period selector */}
+      <div className="flex items-center space-x-3">
+        <span className="text-[10px] font-bold text-zinc-600 uppercase tracking-widest">Period</span>
+        <div className="flex items-center bg-[#111113] p-1 rounded-xl border border-[#1e1e23]">
+          {(['1d', '7d', '30d', '90d'] as MetaPeriod[]).map((p) => (
+            <button key={p} onClick={() => setMetaPeriod(p)} className={`px-4 py-1.5 text-[10px] font-bold rounded-lg transition-all ${metaPeriod === p ? 'bg-blue-500/10 text-blue-400' : 'text-zinc-500 hover:text-zinc-300'}`}>{p}</button>
+          ))}
         </div>
-        <button className="px-4 py-2 bg-amber-500 text-black rounded-lg text-sm font-bold hover:bg-amber-400 transition-colors">
-          Connect APIs
-        </button>
       </div>
 
+      {/* Stat cards */}
       <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-6">
-        <StatCard label="Ad Spend (MTD)" value={MARKETING_STATS.totalSpend ?? '—'} change={0} isCurrency={!!MARKETING_STATS.totalSpend} icon={<svg fill="none" stroke="currentColor" viewBox="0 0 24 24" className="w-4 h-4"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M15 12a3 3 0 11-6 0 3 3 0 016 0z"></path><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M2.458 12C3.732 7.943 7.523 5 12 5c4.478 0 8.268 2.943 9.542 7-1.274 4.057-5.064 7-9.542 7-4.477 0-8.268-2.943-9.542-7z"></path></svg>} />
-        <StatCard label="Marketing ROAS" value={MARKETING_STATS.totalROAS ?? '—'} change={0} icon={<svg fill="none" stroke="currentColor" viewBox="0 0 24 24" className="w-4 h-4"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M13 7h8m0 0v8m0-8l-8 8-4-4-6 6"></path></svg>} />
-        <StatCard label="Customer CAC" value={MARKETING_STATS.cac ?? '—'} change={0} isCurrency={!!MARKETING_STATS.cac} icon={<svg fill="none" stroke="currentColor" viewBox="0 0 24 24" className="w-4 h-4"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M16 7a4 4 0 11-8 0 4 4 0 018 0zM12 14a7 7 0 00-7 7h14a7 7 0 00-7-7z"></path></svg>} />
-        <StatCard label="Conversions" value={MARKETING_STATS.conversions ?? '—'} change={0} icon={<svg fill="none" stroke="currentColor" viewBox="0 0 24 24" className="w-4 h-4"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M9 12l2 2 4-4m6 2a9 9 0 11-18 0 9 9 0 0118 0z"></path></svg>} />
+        <StatCard label="Ad Spend" value={s ? `${s.spend.toFixed(2)}` : '—'} change={0} isCurrency={!!s} icon={<svg fill="none" stroke="currentColor" viewBox="0 0 24 24" className="w-4 h-4"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M12 8c-1.657 0-3 .895-3 2s1.343 2 3 2 3 .895 3 2-1.343 2-3 2m0-8c1.11 0 2.08.402 2.599 1M12 8V7m0 1v8m0 0v1m0-1c-1.11 0-2.08-.402-2.599-1M21 12a9 9 0 11-18 0 9 9 0 0118 0z"></path></svg>} />
+        <StatCard label="ROAS" value={s ? `${s.roas}x` : '—'} change={0} icon={<svg fill="none" stroke="currentColor" viewBox="0 0 24 24" className="w-4 h-4"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M13 7h8m0 0v8m0-8l-8 8-4-4-6 6"></path></svg>} />
+        <StatCard label="CPC" value={s ? `${s.cpc.toFixed(2)}` : '—'} change={0} isCurrency={!!s} icon={<svg fill="none" stroke="currentColor" viewBox="0 0 24 24" className="w-4 h-4"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M15 15l-2 5L9 9l11 4-5 2zm0 0l5 5M7.188 2.239l.777 2.897M5.136 7.965l-2.898-.777M13.95 4.05l-2.122 2.122m-5.657 5.656l-2.12 2.122"></path></svg>} />
+        <StatCard label="CTR" value={s ? `${s.ctr.toFixed(2)}%` : '—'} change={0} icon={<svg fill="none" stroke="currentColor" viewBox="0 0 24 24" className="w-4 h-4"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M15 12a3 3 0 11-6 0 3 3 0 016 0z"></path><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M2.458 12C3.732 7.943 7.523 5 12 5c4.478 0 8.268 2.943 9.542 7-1.274 4.057-5.064 7-9.542 7-4.477 0-8.268-2.943-9.542-7z"></path></svg>} />
       </div>
 
+      {/* Chart + Platform Summary */}
       <div className="grid grid-cols-1 lg:grid-cols-3 gap-8">
         <div className="lg:col-span-2 glass-card p-8 rounded-2xl">
-          <h3 className="text-lg font-bold text-zinc-100 mb-6">Spend vs Revenue Attribution</h3>
-          <div className="h-[350px]">
+          <h3 className="text-lg font-bold text-zinc-100 mb-6">Daily Ad Spend</h3>
+          <div className="h-[300px]">
             <ResponsiveContainer width="100%" height="100%">
-              <AreaChart data={MARKETING_STATS.trends}>
+              <AreaChart data={dailyData}>
                 <defs>
-                  <linearGradient id="colorSpend" x1="0" y1="0" x2="0" y2="1">
-                    <stop offset="5%" stopColor="#3b82f6" stopOpacity={0.15}/>
-                    <stop offset="95%" stopColor="#3b82f6" stopOpacity={0}/>
+                  <linearGradient id="colorMetaSpend" x1="0" y1="0" x2="0" y2="1">
+                    <stop offset="5%" stopColor="#1877F2" stopOpacity={0.2}/>
+                    <stop offset="95%" stopColor="#1877F2" stopOpacity={0}/>
                   </linearGradient>
                 </defs>
                 <CartesianGrid strokeDasharray="0" vertical={false} stroke="#1e1e23" />
-                <XAxis dataKey="day" axisLine={false} tickLine={false} tick={{fontSize: 10, fill: '#52525b'}} />
+                <XAxis dataKey="date" axisLine={false} tickLine={false} tick={{fontSize: 10, fill: '#52525b'}} tickFormatter={(d: string) => { const parts = d.split('-'); return `${parts[1]}/${parts[2]}`; }} />
                 <YAxis hide />
-                <Tooltip contentStyle={{ backgroundColor: '#18181b', border: '1px solid #27272a', borderRadius: '12px', boxShadow: '0 8px 32px rgba(0,0,0,0.5)', color: '#f4f4f5' }} itemStyle={{ color: '#a1a1aa' }} labelStyle={{ color: '#f4f4f5', fontWeight: 600 }} />
-                <Area type="monotone" dataKey="rev" name="Incremental Revenue" stroke="#3b82f6" fill="url(#colorSpend)" strokeWidth={3} />
-                <Area type="monotone" dataKey="spend" name="Ad Spend" stroke="#f59e0b" fill="transparent" strokeWidth={2} strokeDasharray="5 5" />
+                <Tooltip
+                  contentStyle={{ backgroundColor: '#18181b', border: '1px solid #27272a', borderRadius: '12px', boxShadow: '0 8px 32px rgba(0,0,0,0.5)', color: '#f4f4f5' }}
+                  itemStyle={{ color: '#a1a1aa' }}
+                  labelStyle={{ color: '#f4f4f5', fontWeight: 600 }}
+                  formatter={(value: any, name: string) => [`$${Number(value).toFixed(2)}`, name === 'spend' ? 'Spend' : name]}
+                />
+                <Area type="monotone" dataKey="spend" stroke="#1877F2" fill="url(#colorMetaSpend)" strokeWidth={2.5} name="Spend" />
               </AreaChart>
             </ResponsiveContainer>
           </div>
+          {s && (
+            <div className="grid grid-cols-4 gap-4 mt-6">
+              <div className="p-3 bg-[#1a1a1f] rounded-xl">
+                <p className="text-[9px] font-bold text-zinc-600 uppercase tracking-widest">Impressions</p>
+                <p className="text-sm font-black text-zinc-100 tabular-nums mt-1">{s.impressions.toLocaleString()}</p>
+              </div>
+              <div className="p-3 bg-[#1a1a1f] rounded-xl">
+                <p className="text-[9px] font-bold text-zinc-600 uppercase tracking-widest">Clicks</p>
+                <p className="text-sm font-black text-zinc-100 tabular-nums mt-1">{s.clicks.toLocaleString()}</p>
+              </div>
+              <div className="p-3 bg-[#1a1a1f] rounded-xl">
+                <p className="text-[9px] font-bold text-zinc-600 uppercase tracking-widest">Reach</p>
+                <p className="text-sm font-black text-zinc-100 tabular-nums mt-1">{s.reach.toLocaleString()}</p>
+              </div>
+              <div className="p-3 bg-[#1a1a1f] rounded-xl">
+                <p className="text-[9px] font-bold text-zinc-600 uppercase tracking-widest">Conversions</p>
+                <p className="text-sm font-black text-zinc-100 tabular-nums mt-1">{s.conversions}</p>
+              </div>
+            </div>
+          )}
         </div>
 
         <div className="glass-card p-8 rounded-2xl flex flex-col">
-          <h3 className="text-lg font-bold text-zinc-100 mb-8">Platform performance</h3>
-          <div className="space-y-8 flex-grow">
-            {MARKETING_STATS.platforms.map(p => (
-              <div key={p.name} className="flex flex-col space-y-4">
-                <div className="flex justify-between items-center">
-                  <div className="flex items-center space-x-3">
-                    <div className="w-2 h-8 rounded-full" style={{ backgroundColor: p.color }}></div>
-                    <span className="font-bold text-zinc-200">{p.name}</span>
-                  </div>
-                  <a
-                    href={p.profileUrl}
-                    target="_blank"
-                    rel="noopener noreferrer"
-                    className="p-1.5 bg-[#1a1a1f] hover:bg-[#27272a] rounded-lg text-zinc-600 hover:text-blue-400 transition-all border border-[#1e1e23]"
-                  >
-                    <svg className="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M10 6H6a2 2 0 00-2 2v10a2 2 0 002 2h10a2 2 0 002-2v-4M14 4h6m0 0v6m0-6L10 14"></path></svg>
-                  </a>
+          <h3 className="text-lg font-bold text-zinc-100 mb-6">Platforms</h3>
+          <div className="space-y-6 flex-grow">
+            {/* Meta */}
+            <div className="p-5 bg-[#1a1a1f] rounded-xl border border-[#1e1e23]">
+              <div className="flex justify-between items-center mb-4">
+                <div className="flex items-center space-x-3">
+                  <div className="w-2 h-8 rounded-full bg-[#1877F2]"></div>
+                  <span className="font-bold text-zinc-200">Meta Ads</span>
                 </div>
-                <div className="grid grid-cols-2 gap-4">
-                  <div className="bg-[#1a1a1f] p-3 rounded-xl">
-                    <p className="text-[9px] font-bold text-zinc-600 uppercase tracking-widest">Spend</p>
-                    <p className="text-sm font-black text-zinc-100">${p.spend}</p>
-                  </div>
-                  <div className="bg-[#1a1a1f] p-3 rounded-xl">
-                    <p className="text-[9px] font-bold text-zinc-600 uppercase tracking-widest">ROAS</p>
-                    <p className="text-sm font-black text-blue-400">{p.roas}x</p>
-                  </div>
-                </div>
+                <span className={`text-[9px] font-bold uppercase tracking-widest px-2 py-0.5 rounded-full ${metaConnected ? 'bg-emerald-500/10 text-emerald-400' : 'bg-zinc-800 text-zinc-500'}`}>
+                  {metaConnected ? 'Connected' : 'Offline'}
+                </span>
               </div>
-            ))}
+              {s ? (
+                <div className="grid grid-cols-2 gap-3">
+                  <div><p className="text-[9px] font-bold text-zinc-600 uppercase">Spend</p><p className="text-sm font-black text-zinc-100">${s.spend.toFixed(2)}</p></div>
+                  <div><p className="text-[9px] font-bold text-zinc-600 uppercase">ROAS</p><p className="text-sm font-black text-blue-400">{s.roas}x</p></div>
+                  <div><p className="text-[9px] font-bold text-zinc-600 uppercase">CTR</p><p className="text-sm font-black text-zinc-100">{s.ctr.toFixed(2)}%</p></div>
+                  <div><p className="text-[9px] font-bold text-zinc-600 uppercase">CPM</p><p className="text-sm font-black text-zinc-100">${s.cpm.toFixed(2)}</p></div>
+                </div>
+              ) : (
+                <p className="text-xs text-zinc-600">No data available</p>
+              )}
+            </div>
+
+            {/* TikTok placeholder */}
+            <div className="p-5 bg-[#1a1a1f] rounded-xl border border-[#1e1e23]">
+              <div className="flex justify-between items-center mb-4">
+                <div className="flex items-center space-x-3">
+                  <div className="w-2 h-8 rounded-full bg-[#EE1D52]"></div>
+                  <span className="font-bold text-zinc-200">TikTok Ads</span>
+                </div>
+                <span className="text-[9px] font-bold uppercase tracking-widest px-2 py-0.5 rounded-full bg-zinc-800 text-zinc-500">Coming Soon</span>
+              </div>
+              <p className="text-xs text-zinc-600">TikTok Ads API integration pending. Connect your developer account in Settings.</p>
+            </div>
           </div>
-          
-          <div className="mt-8 pt-8 border-t border-[#1e1e23]">
+
+          <div className="mt-6 pt-6 border-t border-[#1e1e23]">
             <h4 className="text-[10px] font-black text-zinc-600 uppercase tracking-[0.2em] mb-4">Official Channels</h4>
             <div className="grid grid-cols-2 gap-3">
-              <a href="https://facebook.com/boundariescoffee" target="_blank" className="flex items-center space-x-2 p-3 bg-[#1877F2]/10 hover:bg-[#1877F2]/15 rounded-xl transition-all group">
+              <a href="https://facebook.com/boundariescoffee" target="_blank" rel="noopener noreferrer" className="flex items-center space-x-2 p-3 bg-[#1877F2]/10 hover:bg-[#1877F2]/15 rounded-xl transition-all group">
                 <svg className="w-5 h-5 text-[#1877F2]" fill="currentColor" viewBox="0 0 24 24"><path d="M24 12.073c0-6.627-5.373-12-12-12s-12 5.373-12 12c0 5.99 4.388 10.954 10.125 11.854v-8.385H7.078v-3.47h3.047V9.43c0-3.007 1.792-4.669 4.533-4.669 1.312 0 2.686.235 2.686.235v2.953H15.83c-1.491 0-1.956.925-1.956 1.874v2.25h3.328l-.532 3.47h-2.796v8.385C19.612 23.027 24 18.062 24 12.073z"/></svg>
-                <span className="text-[11px] font-bold text-zinc-400 group-hover:text-zinc-200">Meta Feed</span>
+                <span className="text-[11px] font-bold text-zinc-400 group-hover:text-zinc-200">Meta</span>
               </a>
-              <a href="https://tiktok.com/@boundariescoffee" target="_blank" className="flex items-center space-x-2 p-3 bg-[#1a1a1f] hover:bg-[#27272a] rounded-xl transition-all group border border-[#1e1e23]">
+              <a href="https://tiktok.com/@boundariescoffee" target="_blank" rel="noopener noreferrer" className="flex items-center space-x-2 p-3 bg-[#1a1a1f] hover:bg-[#27272a] rounded-xl transition-all group border border-[#1e1e23]">
                 <svg className="w-5 h-5 text-white" fill="currentColor" viewBox="0 0 24 24"><path d="M12.525.02c1.31-.02 2.61-.01 3.91-.02.08 1.53.63 3.09 1.75 4.17 1.12 1.11 2.7 1.62 4.24 1.79v4.03c-1.44-.05-2.89-.35-4.2-.97-.57-.26-1.1-.59-1.62-.93-.01 2.92.01 5.84-.02 8.75-.08 1.4-.54 2.79-1.35 3.94-1.31 1.92-3.58 3.17-5.91 3.21-1.43.08-2.86-.31-4.08-1.03-2.02-1.19-3.44-3.37-3.65-5.71-.28-2.26.74-4.63 2.58-5.91 1.02-.73 2.24-1.09 3.48-1.11V12c-.22.01-.45.03-.66.1-.96.22-1.78.96-2.12 1.89-.35.8-.25 1.76.2 2.48.51.8 1.4 1.31 2.34 1.34 1.16.1 2.35-.61 2.76-1.68.21-.49.25-1.03.24-1.56l.03-14.55z"/></svg>
-                <span className="text-[11px] font-bold text-zinc-400 group-hover:text-zinc-200">TikTok Feed</span>
+                <span className="text-[11px] font-bold text-zinc-400 group-hover:text-zinc-200">TikTok</span>
               </a>
             </div>
           </div>
         </div>
       </div>
+
+      {/* Campaign Performance Table */}
+      {campaigns.length > 0 && (
+        <div className="glass-card glow-top rounded-2xl overflow-hidden">
+          <div className="px-8 py-6 border-b border-[#1e1e23]">
+            <h3 className="text-lg font-bold text-zinc-100">Campaign Performance</h3>
+          </div>
+          <div className="overflow-x-auto">
+            <table className="min-w-full divide-y divide-[#1e1e23]">
+              <thead>
+                <tr className="bg-[#0d0d10]">
+                  <th className="px-6 py-4 text-left text-[10px] font-bold text-zinc-600 uppercase tracking-widest">Campaign</th>
+                  <th className="px-6 py-4 text-left text-[10px] font-bold text-zinc-600 uppercase tracking-widest">Status</th>
+                  <th className="px-6 py-4 text-right text-[10px] font-bold text-zinc-600 uppercase tracking-widest">Spend</th>
+                  <th className="px-6 py-4 text-right text-[10px] font-bold text-zinc-600 uppercase tracking-widest">Impressions</th>
+                  <th className="px-6 py-4 text-right text-[10px] font-bold text-zinc-600 uppercase tracking-widest">Clicks</th>
+                  <th className="px-6 py-4 text-right text-[10px] font-bold text-zinc-600 uppercase tracking-widest">CTR</th>
+                  <th className="px-6 py-4 text-right text-[10px] font-bold text-zinc-600 uppercase tracking-widest">CPC</th>
+                </tr>
+              </thead>
+              <tbody className="divide-y divide-[#1e1e23]">
+                {campaigns.map((c) => (
+                  <tr key={c.id} className="hover:bg-[#1a1a1f] transition-colors">
+                    <td className="px-6 py-4">
+                      <p className="text-sm font-semibold text-zinc-200 truncate max-w-[200px]">{c.name}</p>
+                      <p className="text-[10px] text-zinc-600">{c.objective}</p>
+                    </td>
+                    <td className="px-6 py-4">
+                      <span className={`text-[9px] font-bold uppercase tracking-widest px-2 py-0.5 rounded-full ${
+                        c.status === 'ACTIVE' ? 'bg-emerald-500/10 text-emerald-400' :
+                        c.status === 'PAUSED' ? 'bg-amber-500/10 text-amber-400' :
+                        'bg-zinc-800 text-zinc-500'
+                      }`}>{c.status}</span>
+                    </td>
+                    <td className="px-6 py-4 text-right text-sm font-bold text-zinc-100 tabular-nums">{c.metrics ? `$${c.metrics.spend.toFixed(2)}` : '—'}</td>
+                    <td className="px-6 py-4 text-right text-sm text-zinc-300 tabular-nums">{c.metrics ? c.metrics.impressions.toLocaleString() : '—'}</td>
+                    <td className="px-6 py-4 text-right text-sm text-zinc-300 tabular-nums">{c.metrics ? c.metrics.clicks.toLocaleString() : '—'}</td>
+                    <td className="px-6 py-4 text-right text-sm text-zinc-300 tabular-nums">{c.metrics ? `${c.metrics.ctr.toFixed(2)}%` : '—'}</td>
+                    <td className="px-6 py-4 text-right text-sm text-zinc-300 tabular-nums">{c.metrics ? `$${c.metrics.cpc.toFixed(2)}` : '—'}</td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+        </div>
+      )}
     </div>
-  );
+    );
+  };
 
   const renderFinancials = () => {
     const budget = BUDGET_DATA.currentMonth;

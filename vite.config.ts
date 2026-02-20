@@ -735,6 +735,148 @@ function apiPlugin(env: Record<string, string>) {
       });
 
       // ==========================================
+      // Meta Ads API
+      // ==========================================
+
+      server.middlewares.use(async (req: any, res: any, next: any) => {
+        if (!req.url?.startsWith('/api/meta-ads')) {
+          return next();
+        }
+
+        res.setHeader('Content-Type', 'application/json');
+        res.setHeader('Access-Control-Allow-Origin', '*');
+
+        const metaToken = env.META_ACCESS_TOKEN;
+        const metaAccountId = env.META_AD_ACCOUNT_ID || 'act_126144970';
+        const metaApiVersion = 'v18.0';
+        const metaBase = `https://graph.facebook.com/${metaApiVersion}`;
+
+        if (!metaToken) {
+          res.statusCode = 500;
+          res.end(JSON.stringify({ error: 'META_ACCESS_TOKEN not configured' }));
+          return;
+        }
+
+        try {
+          const url = new URL(req.url, 'http://localhost');
+          const period = url.searchParams.get('period') || '7d';
+
+          // Calculate date range
+          const endDate = new Date();
+          const startDate = new Date();
+          switch (period) {
+            case '1d': startDate.setDate(startDate.getDate() - 1); break;
+            case '7d': startDate.setDate(startDate.getDate() - 7); break;
+            case '30d': startDate.setDate(startDate.getDate() - 30); break;
+            case '90d': startDate.setDate(startDate.getDate() - 90); break;
+            default: startDate.setDate(startDate.getDate() - 7);
+          }
+
+          const dateRange = {
+            since: startDate.toISOString().split('T')[0],
+            until: endDate.toISOString().split('T')[0],
+          };
+
+          // Fetch account-level insights
+          const insightsParams = new URLSearchParams({
+            access_token: metaToken,
+            fields: 'spend,impressions,clicks,reach,cpc,cpm,ctr,actions',
+            time_range: JSON.stringify(dateRange),
+            level: 'account',
+          });
+          const insightsResp = await fetch(`${metaBase}/${metaAccountId}/insights?${insightsParams}`);
+          const insightsData = await insightsResp.json();
+
+          if (insightsData.error) {
+            res.statusCode = 400;
+            res.end(JSON.stringify({ error: 'Meta API error', details: insightsData.error.message }));
+            return;
+          }
+
+          // Fetch daily breakdown for chart
+          const dailyParams = new URLSearchParams({
+            access_token: metaToken,
+            fields: 'spend,impressions,clicks',
+            time_range: JSON.stringify(dateRange),
+            time_increment: '1',
+            level: 'account',
+          });
+          const dailyResp = await fetch(`${metaBase}/${metaAccountId}/insights?${dailyParams}`);
+          const dailyRaw = await dailyResp.json();
+
+          const dailyData = (dailyRaw.data || []).map((d: any) => ({
+            date: d.date_start,
+            spend: parseFloat(d.spend || '0'),
+            impressions: parseInt(d.impressions || '0', 10),
+            clicks: parseInt(d.clicks || '0', 10),
+          }));
+
+          // Fetch campaigns
+          const campaignsParams = new URLSearchParams({
+            access_token: metaToken,
+            fields: 'id,name,status,objective,insights{spend,impressions,clicks,ctr,cpc}',
+            time_range: JSON.stringify(dateRange),
+            limit: '50',
+          });
+          const campaignsResp = await fetch(`${metaBase}/${metaAccountId}/campaigns?${campaignsParams}`);
+          const campaignsData = await campaignsResp.json();
+
+          // Process account insights
+          const acct = insightsData.data?.[0] || {};
+          const conversions = (acct.actions || []).reduce((sum: number, a: any) => {
+            if (['purchase', 'lead', 'complete_registration', 'add_to_cart'].includes(a.action_type)) {
+              return sum + parseInt(a.value, 10);
+            }
+            return sum;
+          }, 0);
+
+          const purchaseValue = (acct.actions || []).find((a: any) => a.action_type === 'purchase')?.value || 0;
+          const spend = parseFloat(acct.spend || '0');
+          const roas = spend > 0 ? parseFloat(String(purchaseValue)) / spend : 0;
+
+          const result = {
+            period,
+            dateRange,
+            summary: {
+              spend,
+              impressions: parseInt(acct.impressions || '0', 10),
+              clicks: parseInt(acct.clicks || '0', 10),
+              reach: parseInt(acct.reach || '0', 10),
+              cpc: parseFloat(acct.cpc || '0'),
+              cpm: parseFloat(acct.cpm || '0'),
+              ctr: parseFloat(acct.ctr || '0'),
+              conversions,
+              roas: Math.round(roas * 100) / 100,
+            },
+            campaigns: (campaignsData.data || []).map((c: any) => ({
+              id: c.id,
+              name: c.name,
+              status: c.status,
+              objective: c.objective,
+              metrics: c.insights?.data?.[0] ? {
+                spend: parseFloat(c.insights.data[0].spend || '0'),
+                impressions: parseInt(c.insights.data[0].impressions || '0', 10),
+                clicks: parseInt(c.insights.data[0].clicks || '0', 10),
+                ctr: parseFloat(c.insights.data[0].ctr || '0'),
+                cpc: parseFloat(c.insights.data[0].cpc || '0'),
+              } : null,
+            })),
+            dailyData,
+            fetchedAt: new Date().toISOString(),
+          };
+
+          res.end(JSON.stringify(result));
+        } catch (error) {
+          console.error('Meta Ads API error:', error);
+          res.statusCode = 500;
+          res.end(JSON.stringify({
+            error: 'Failed to fetch Meta Ads data',
+            details: error instanceof Error ? error.message : 'Unknown error',
+          }));
+        }
+      });
+
+      // ==========================================
       // OpenClaw + Bland AI APIs
       // ==========================================
 
