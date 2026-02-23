@@ -300,6 +300,118 @@ function apiPlugin(env: Record<string, string>) {
   return {
     name: 'toast-api-dev',
     configureServer(server: any) {
+      // ─── Credentials Management ───
+      const CREDENTIAL_SERVICES = [
+        {
+          id: 'toast', name: 'Toast POS', icon: 'pos',
+          fields: [
+            { key: 'TOAST_CLIENT_ID', label: 'Client ID' },
+            { key: 'TOAST_CLIENT_SECRET', label: 'Client Secret' },
+            { key: 'TOAST_RESTAURANT_LITTLEELM', label: 'Little Elm GUID' },
+            { key: 'TOAST_RESTAURANT_PROSPER', label: 'Prosper GUID' },
+          ],
+        },
+        {
+          id: 'meta', name: 'Meta Ads', icon: 'meta',
+          fields: [
+            { key: 'META_ACCESS_TOKEN', label: 'Access Token' },
+            { key: 'META_AD_ACCOUNT_ID', label: 'Ad Account ID' },
+            { key: 'META_BUSINESS_ID', label: 'Business ID' },
+          ],
+        },
+        {
+          id: 'bland', name: 'Bland AI', icon: 'phone',
+          fields: [
+            { key: 'BLAND_API_KEY', label: 'API Key' },
+          ],
+        },
+        {
+          id: 'openclaw', name: 'OpenClaw', icon: 'bot',
+          fields: [
+            { key: 'OPENCLAW_GATEWAY_URL', label: 'Gateway URL' },
+            { key: 'OPENCLAW_GATEWAY_TOKEN', label: 'Gateway Token' },
+          ],
+        },
+      ];
+
+      function maskValue(val: string): string {
+        if (!val || val.length <= 4) return val ? '••••' : '';
+        return '•••••' + val.slice(-4);
+      }
+
+      function getCredentialValue(key: string): string {
+        return process.env[key] || env[key] || '';
+      }
+
+      // GET /api/credentials
+      server.middlewares.use(async (req: any, res: any, next: any) => {
+        if (req.url !== '/api/credentials' || req.method !== 'GET') return next();
+        res.setHeader('Content-Type', 'application/json');
+        const services = CREDENTIAL_SERVICES.map(svc => {
+          const fields = svc.fields.map(f => {
+            const val = getCredentialValue(f.key);
+            return { key: f.key, label: f.label, masked: maskValue(val), hasValue: !!val };
+          });
+          const connected = fields.every(f => f.hasValue);
+          return { ...svc, fields, connected };
+        });
+        res.end(JSON.stringify({ services }));
+      });
+
+      // POST /api/credentials
+      server.middlewares.use(async (req: any, res: any, next: any) => {
+        if (req.url !== '/api/credentials' || req.method !== 'POST') return next();
+        res.setHeader('Content-Type', 'application/json');
+        try {
+          const body = await new Promise<string>((resolve) => {
+            let data = '';
+            req.on('data', (chunk: any) => { data += chunk; });
+            req.on('end', () => resolve(data));
+          });
+          const { key, value } = JSON.parse(body);
+
+          // Validate key is one we manage
+          const allKeys = CREDENTIAL_SERVICES.flatMap(s => s.fields.map(f => f.key));
+          if (!allKeys.includes(key)) {
+            res.statusCode = 400;
+            res.end(JSON.stringify({ error: 'Invalid credential key' }));
+            return;
+          }
+
+          // Update in memory
+          process.env[key] = value;
+          env[key] = value;
+
+          // Persist to .env.local
+          const envPath = path.resolve('.', '.env.local');
+          let envContent = '';
+          try { envContent = fs.readFileSync(envPath, 'utf-8'); } catch { /* file may not exist */ }
+
+          // Check if key already exists (with or without quotes)
+          const lineRegex = new RegExp(`^${key}=.*$`, 'm');
+          const needsQuotes = value.includes(' ') || value.includes('"') || value.includes('#');
+          const newLine = needsQuotes ? `${key}="${value}"` : `${key}=${value}`;
+
+          if (lineRegex.test(envContent)) {
+            envContent = envContent.replace(lineRegex, newLine);
+          } else {
+            envContent = envContent.trimEnd() + '\n' + newLine + '\n';
+          }
+          fs.writeFileSync(envPath, envContent);
+
+          // Clear cached Toast token if Toast credentials changed
+          if (key.startsWith('TOAST_')) {
+            cachedToken = null;
+          }
+
+          const masked = maskValue(value);
+          res.end(JSON.stringify({ success: true, masked }));
+        } catch (error) {
+          res.statusCode = 500;
+          res.end(JSON.stringify({ error: 'Failed to save credential' }));
+        }
+      });
+
       // Toast Direct (Sales) API
       server.middlewares.use(async (req: any, res: any, next: any) => {
         if (!req.url?.startsWith('/api/toast-direct')) {

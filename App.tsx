@@ -18,6 +18,7 @@ import type { DailySales } from './src/hooks/useDailySalesData';
 import { useMetaAds, type MetaPeriod } from './src/hooks/useMetaAds';
 import { useOpenClawSessions, useOpenClawChat, useOpenClawHistory, type OpenClawSession, type ChatMessage } from './src/hooks/useOpenClaw';
 import { useBlandCalls, useInitiateCall, type BlandCall } from './src/hooks/useBlandCalls';
+import { useCredentials, type CredentialService } from './src/hooks/useCredentials';
 
 
 const SidebarItem = ({ label, active = false, onClick, icon }: { label: string, active?: boolean, onClick: () => void, icon: React.ReactNode }) => (
@@ -48,6 +49,11 @@ const App: React.FC = () => {
   const [metaPeriod, setMetaPeriod] = useState<MetaPeriod>('7d');
   const { data: metaData, loading: metaLoading, error: metaError } = useMetaAds(metaPeriod);
   const metaConnected = !!metaData?.summary;
+
+  // Credentials hooks
+  const { services: credServices, updateCredential } = useCredentials();
+  const [credInputs, setCredInputs] = useState<Record<string, string>>({});
+  const [credSaving, setCredSaving] = useState<string | null>(null);
 
   // Team page hooks
   const { sessions: openClawSessions, loading: sessionsLoading } = useOpenClawSessions();
@@ -798,8 +804,76 @@ const App: React.FC = () => {
 
   const MONTH_LABELS = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'];
 
+  const handleCredSave = async (key: string) => {
+    const value = credInputs[key];
+    if (!value?.trim()) return;
+    setCredSaving(key);
+    const ok = await updateCredential(key, value.trim());
+    if (ok) {
+      setCredInputs(prev => { const n = { ...prev }; delete n[key]; return n; });
+    }
+    setCredSaving(null);
+  };
+
+  const svcIcons: Record<string, React.ReactNode> = {
+    pos: <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="1.5" d="M9 7h6m0 10v-3m-3 3h.01M9 17h.01M9 14h.01M12 14h.01M15 11h.01M12 11h.01M9 11h.01M7 21h10a2 2 0 002-2V5a2 2 0 00-2-2H7a2 2 0 00-2 2v14a2 2 0 002 2z"/></svg>,
+    meta: <svg className="w-5 h-5" fill="currentColor" viewBox="0 0 24 24"><path d="M12 2C6.477 2 2 6.477 2 12c0 4.991 3.657 9.128 8.438 9.879V14.89h-2.54V12h2.54V9.797c0-2.506 1.492-3.89 3.777-3.89 1.094 0 2.238.195 2.238.195v2.46h-1.26c-1.243 0-1.63.771-1.63 1.562V12h2.773l-.443 2.89h-2.33v6.989C18.343 21.129 22 16.99 22 12c0-5.523-4.477-10-10-10z"/></svg>,
+    phone: <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="1.5" d="M3 5a2 2 0 012-2h3.28a1 1 0 01.948.684l1.498 4.493a1 1 0 01-.502 1.21l-2.257 1.13a11.042 11.042 0 005.516 5.516l1.13-2.257a1 1 0 011.21-.502l4.493 1.498a1 1 0 01.684.949V19a2 2 0 01-2 2h-1C9.716 21 3 14.284 3 6V5z"/></svg>,
+    bot: <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="1.5" d="M9.75 17L9 20l-1 1h8l-1-1-.75-3M3 13h18M5 17h14a2 2 0 002-2V5a2 2 0 00-2-2H5a2 2 0 00-2 2v10a2 2 0 002 2z"/></svg>,
+  };
+
   const renderSettings = () => (
     <div className="space-y-10 animate-in fade-in duration-500">
+      {/* API Connections */}
+      <div>
+        <div className="mb-6">
+          <h3 className="text-lg font-bold text-zinc-100">API Connections</h3>
+          <p className="text-sm text-zinc-500 mt-1">Manage credentials for integrated services. Values are masked for security.</p>
+        </div>
+        <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
+          {credServices.map((svc) => (
+            <div key={svc.id} className="glass-card rounded-2xl overflow-hidden">
+              <div className="px-6 py-4 border-b border-[#1e1e23] flex justify-between items-center">
+                <div className="flex items-center space-x-3">
+                  <div className="w-9 h-9 bg-[#1a1a1f] rounded-xl flex items-center justify-center text-blue-400 border border-[#1e1e23]">
+                    {svcIcons[svc.icon] || svcIcons.bot}
+                  </div>
+                  <span className="text-sm font-bold text-zinc-100">{svc.name}</span>
+                </div>
+                <span className={`text-[9px] font-bold uppercase tracking-widest px-2.5 py-1 rounded-full ${
+                  svc.connected ? 'bg-emerald-500/10 text-emerald-400' : 'bg-zinc-800 text-zinc-500'
+                }`}>
+                  {svc.connected ? 'Connected' : 'Not Configured'}
+                </span>
+              </div>
+              <div className="p-6 space-y-3">
+                {svc.fields.map((field) => (
+                  <div key={field.key} className="flex items-center space-x-3">
+                    <label className="text-[10px] font-bold text-zinc-600 uppercase tracking-widest w-28 flex-shrink-0 truncate" title={field.label}>{field.label}</label>
+                    <input
+                      type="text"
+                      value={credInputs[field.key] || ''}
+                      onChange={(e) => setCredInputs(prev => ({ ...prev, [field.key]: e.target.value }))}
+                      placeholder={field.hasValue ? field.masked : 'Not set'}
+                      onKeyDown={(e) => e.key === 'Enter' && handleCredSave(field.key)}
+                      className="flex-grow bg-[#1a1a1f] border border-[#1e1e23] rounded-lg px-3 py-2 text-xs text-zinc-200 placeholder-zinc-600 focus:border-blue-500/50 focus:outline-none transition-colors font-mono"
+                    />
+                    <button
+                      onClick={() => handleCredSave(field.key)}
+                      disabled={!credInputs[field.key]?.trim() || credSaving === field.key}
+                      className="px-3 py-2 bg-blue-600 hover:bg-blue-500 disabled:opacity-30 disabled:hover:bg-blue-600 text-white rounded-lg text-[10px] font-bold transition-colors flex-shrink-0"
+                    >
+                      {credSaving === field.key ? '...' : 'Save'}
+                    </button>
+                  </div>
+                ))}
+              </div>
+            </div>
+          ))}
+        </div>
+      </div>
+
+      {/* Revenue Budget */}
       <div className="glass-card glow-top p-8 rounded-2xl">
         <div className="flex justify-between items-center mb-8">
           <div>
