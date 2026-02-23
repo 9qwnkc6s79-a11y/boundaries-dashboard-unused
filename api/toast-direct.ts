@@ -322,6 +322,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
     const currentAvgCheck = currentResults[0]?.averageCheck || 0;
     const lastMonthAvgCheck = lastMonthResults[0]?.averageCheck || 0;
 
+    // @ts-expect-error TS2872 — Vercel response chaining
     return res.status(200).json({
       ...currentResults[0],
       sssg: isSssgEligible ? Math.round(sssg * 10) / 10 : null,
